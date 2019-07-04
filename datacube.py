@@ -58,11 +58,12 @@ class Datacube():
 		n_atomic_all_cubes = int(n_atomic_per_cubes*self.n_cubes)
 		
 		if blocks.is_integer():
-			self.atomic_5d = [[[[[0 for i in range(atomic_width)] for j in range(atomic_height)] for k in range(channel_size_atomic)] for l in range(n_atomic_per_cubes)] for m in range(self.n_cubes)]
+			self.atomic_5d = [[[[[random.random() for i in range(atomic_width)] for j in range(atomic_height)] for k in range(channel_size_atomic)] for l in range(n_atomic_per_cubes)] for m in range(self.n_cubes)]
 		else:
 			zero_concat_channels = self.zero_concat()
 			print(zero_concat_channels)
-			self.atomic_5d = [[[[[0 for i in range(atomic_width)] for j in range(atomic_height)] for k in range(channel_size_atomic)] for l in range(zero_concat_channels)] for m in range(self.n_cubes)]
+
+			self.atomic_5d = [[[[[random.random() for i in range(atomic_width)] for j in range(atomic_height)] for k in range(channel_size_atomic)] for l in range(zero_concat_channels)] for m in range(self.n_cubes)]
 
 		return self.atomic_5d
 
