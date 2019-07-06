@@ -4,10 +4,11 @@ import random
 import sys
 def create_matrix():
 	''' define 5d matrices   '''
+	skip = 1
 	mat_1 = [[[[[round(random.random(),3) for i in range(1)] for j in range(1)] for k in range(64)] for l in range(18)] for m in range(2)]
 	mat_2 = [[[[[0 for i in range(1)] for j in range(1)] for k in range(64)] for l in range(18)] for m in range(2)]
 	mat_3 = [[[[[0 for i in range(1)] for j in range(1)] for k in range(64)] for l in range(1)] for m in range(2)]
-	check_type(mat_1)
+	check_type(skip,mat_1)
 	check_dims(mat_1, mat_2)
 	check_dims(mat_1, mat_3)
 
@@ -50,7 +51,6 @@ def matrix_concat(c,m_1,m_2,m_3):
 	if (c == 'c'):
 		print("Concatenating along channel direction")
 		concat_mat = channel(m_1,m_2)
-
 	elif(c == 'l'):
 		print("Concatenate along left direction")
 		concat_mat = left(m_1, m_3)
@@ -70,15 +70,16 @@ def channel(m,n):
 	d_m = dimensions(m)
 	d_n = dimensions(n)
 	zero_concat = [[ [] for i in range(d_m[3])] for j in range(d_m[4])]
-	print(zero_concat)
+	
 	for c_n in range(d_m[4]):
 		for a_n in range(d_m[3]):	
 			li = m[c_n][a_n][:][:][:]
 			ap = n[c_n][a_n][:][:][:]
 			li.extend(ap)
-			zero_concat[c_n][a_n].append(li)
+			zero_concat[c_n][a_n].extend(li)
 
 	return zero_concat
+
 
 def dimensions(mat):
 	'''find the dimension lengths '''
@@ -90,12 +91,15 @@ def dimensions(mat):
 	dims = [zero_th,first,second,third,fourth]
 	return dims
 
-def check_type(mat):
-	#print(type(mat[:][:][:][0][0]))
-   	#print(len(mat[:][:][:][0][:]))
-	#print(mat[0][0][:][:][:])
-	#print(mat[0][0][0][:][:])
-	pass
+def check_type(skip,mat):
+	if skip:
+		pass
+	else:
+		print(type(mat[:][:][:][0][0]))
+		print(len(mat[:][:][:][0][:]))
+		print(mat[0][0][:][:][:])
+		print(mat[0][0][0][:][:])
+		
 
 def main():
 	m_1, m_2, m_3 = create_matrix()
