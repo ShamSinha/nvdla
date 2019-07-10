@@ -8,6 +8,8 @@
 '''
 import pprint
 import random
+import matrix_concat 
+import math
 class Datacube():
 	
 	atomic_5d = [[[[[]]]]]  # empty atomic cube data structure unique to every data cube 
@@ -37,7 +39,7 @@ class Datacube():
 		'''define the dimensions of atomic cubes across all cubes '''
 
 		channel_size_atomic = 64 
-		blocks = self.channels/channel_size_atomic  # FIX here, n_atomic_* go to 0 when channel size < 64
+		blocks = math.ceil(self.channels/channel_size_atomic ) # FIX here, n_atomic_* go to 0 when channel size < 64
 		n_atomic_per_cubes = int(self.width*self.height*blocks)
 		n_atomic_all_cubes = int(n_atomic_per_cubes*self.n_cubes)
 		
@@ -63,7 +65,7 @@ class Datacube():
 		atomic_height = 1
 		channel_size_atomic = 64 
 		zero_concat_channels = self.zero_concat_channels()  # number of channels with zero values
-		print(zero_concat_channels)
+		#print(zero_concat_channels)
 		zero_cube = [[[[[0 for i in range(atomic_width)] for j in range(atomic_height)] for k in range(channel_size_atomic)] for l in range(zero_concat_channels)] for m in range(self.n_cubes)]
 
 		return zero_cube
@@ -78,14 +80,20 @@ class Datacube():
 				zero concatenated atomic cube = atomic 
 		'''
 		# Addition will take place in the channel dimension all things being the same
-		length_atomic = self.channels 
-		length_zero = len(zero[0][0][:][0][0])
-		total_length = length_zero + length_atomic # total channel length after zero addition 
-		for cube_no in range(self.n_cubes):
-			for atomic_no_ in range(self.height*self.width):
-				#for channel_no in range(length_atomic,total_length):
-				atomic[0][0][:][atomic_no_][cube_no].append(zero[0][0][:][atomic_no_][cube_no])
-
+		blocks, x = self.dimensions()
+		surface_blocks = self.height*self.width
+		blocks = blocks//surface_blocks
+		cube_blocks = surface_blocks*blocks
+		print(surface_blocks, " ", cube_blocks)
+		#zero_concat = [[ [] for i in range(surface_blocks)] for j in range(self.n_cubes)]
+		for c_n in range(self.n_cubes):
+			for a_n in range(surface_blocks):
+				li = atomic[c_n][cube_blocks - a_n-1][:][:][:]
+				ap = zero[c_n][a_n][:][:][:]
+				print('That')
+				li.extend(ap)
+				atomic[c_n][cube_blocks - 1 - a_n].extend(li)
+				
 		return atomic 
 
 	def initialize_atomic_cubes(self):
@@ -119,7 +127,6 @@ class Datacube():
 	
 	def print_values(self):
 		'''print the dimensions of the data cube '''
-
 		print(self.width, " ", self.height, " ", self.channels, " ", self.n_cubes)
 		print(self.pad[0], " ", self.pad[1], " ", self.pad[2], " ", self.pad[3])
 
@@ -144,7 +151,7 @@ def ask_user():
 			bottom = int(input("Enter bottom padding"))
 		else:
 			[left,right,top,bottom] = [0,0,0,0]
-			pad = [left, right, top , bottom]
+		pad = [left, right, top , bottom]
 		input_cube = Datacube(w,h,c,pres,pad,n)
 		input_cube.print_values()
 		atmoics = input_cube.initialize_atomic_cubes()
@@ -156,7 +163,7 @@ def ask_user():
 
 		
 	except Exception as e:
-		print (e.message , e.args)
+		print ("Some error occured")
 
 
 if __name__ == '__main__':

@@ -68,7 +68,6 @@ def matrix_concat(c,m_1,m_2,m_3):
 
 def channel(m,n):
 	d_m = dimensions(m)
-	d_n = dimensions(n)
 	zero_concat = [[ [] for i in range(d_m[3])] for j in range(d_m[4])]
 	
 	for c_n in range(d_m[4]):
@@ -77,9 +76,8 @@ def channel(m,n):
 			ap = n[c_n][a_n][:][:][:]
 			li.extend(ap)
 			zero_concat[c_n][a_n].extend(li)
-
+	
 	return zero_concat
-
 
 def dimensions(mat):
 	'''find the dimension lengths '''
