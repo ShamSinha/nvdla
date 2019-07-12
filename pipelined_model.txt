@@ -106,6 +106,7 @@
 	Once all the layers are computed for convolution we will arrive at an upsampling stage which is to be handled by the host processor during this period the NVDLA would stall and wait for the upsampled data to be loaded back into 
 	DRAM at which point further computation with this new data can proceed as it we were starting a new computation. 
 
+	Since we are required to write into SRAM and also read from it to store a copy in DRAM we should opt for a dual port SRAM which will reduce the latency involved.
 
 	Now for some big questions and final summary ---- 
 	1) What should be the size of SRAM?
@@ -114,18 +115,19 @@
 	4) What are total number of conditions that we need to check and more importantly when do we check these ?
 	5) The timing model for each pipeline should be considered?
 	6) How is this systematic ?
-	
+	   More 
+	   ...
+	   ..
 
-
-	There appears to be hierarchy in pipeling as well and it is dependent on what condition it meets as convolution progresses. So we need to be careful of that.
-	Also since data has already been partitioned properly by NVDLA, all we need to worry about is the right kind of pipelining. Which means, we ensure an efficient flow of information, there are no collisions, 
+	There appears to be hierarchy in pipeling and it is dependent on what condition it meets as convolution progresses. So we need to be careful about that.
+	Also, since data has already been partitioned properly by NVDLA, all we need to worry about is the right kind of pipelining. Which means, we ensure an efficient flow of information, there are no collisions, 
 	data and the right kind of data is always available for use at the right place at the right time ( if there are dependencies we must take that into account) , the stages involved should not overflow, we compute all layers and also take into account the time spent by host processor in doing operations that are not supported in NVDLA like upsampling. The appropriate cycles should be included. 
 
 	Summary : Will be used in presentation 
 
 	Systematic approach to NVDLA cycles Computation for Neural Networks 
-	
-	
+
+
 
 
 
