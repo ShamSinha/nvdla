@@ -62,7 +62,14 @@ In the code following this introduction Functions are labelled as :
 In each operation function the state of the system is defined in terms of active or idle 
 This is pretty important as it will tell us what modules are functional at any time 
 
-Important Note - time in this file means cycles. 										
+Important Note - time in this file means cycles. 	
+
+The wait time in cases where multiple read/writes must happend with a memory unit, can be modelled as a stochastic varible. The specifics can be hammered later
+
+The goal is that the program outputs an equation for computation of an image input. This can be done only when all the layers in the network have been computed. 
+
+
+									
  '''
 
 # lists holding the sizes in bits
@@ -241,23 +248,207 @@ def make_chunks_SRAM_CBUF(index_weights,index_feature):
 		CBUF_CHUNKS_FROM_SRAM.append(cbuf_chunk_array)   # CBUF_CHUNKS_FROM_SRAM will be created when all the indices in SRAM_CHUNKS_FROM_DRAM have been parsed
 														 # Now, each individual values of CBUF_CHUNKS_FROM_SRAM will feed into the Pipe 2 
 
-
+delay_cdma = t0_CDMA   # time spent for the first set of values transferred from SRAM to CDMA. Same idea as BDMA. More accuracy can be achieved later
+SRAM_writing_bandwidth = Writing_bits   
+CBUF_reading_bandwidth = 192*8 # bits to CBUF
+CBUF_Reading_time = t0_CBUF
+CBUF_Writing_time = t1_CBUF
+CBUF_writing_bandwidth = 256*8 # bits to CSC
 '''Operation'''
-def time_SRAM_CBUF():
+def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 	''' calculate the total time taken to transfer one sram_chunk into CBUF 
 		The sram_chunks stored in SRAM_CHUNKS_FROM_DRAM would be transferred into CBUF one at a time. Not adjacently. First one will be transferred to CBUF
-		The time taken to do so would be calculated and then the next one would be calculated when the first one has been computed completely in the remaining pipeline '''
+		The time taken to do so would be calculated and then the next one would be calculated when the first one has been computed completely in the remaining pipeline
+		Note : SRAM  ------ active 
+		   	   CBUF  ------ active
+		   	   Other ------ idle  
+		 '''
+		stages = {'dram':'idle', 'sram':'active', 'cbuf':'active', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
+		logger.info("Active and Idle stages : {}".format(stages))
+		
+		chunk_to_be_read = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]  # bits 
+		total_chunks_to_read = chunks_to_be_read/SRAM_writing_bandwidth   # total number of chunks we need to read from SRAM
+		total_transfer_time = 0
+		first_transfer_time = SRAM_writing_time + delay_cdma + CBUF_Reading_time
+		logging.info("SRAM --> CBUF")
+		
+		for chunk in range(total_chunks_to_read-1): # for the remainder of chunks we just add the time taken to read from SRAM
+			total_transfer_time += SRAM_reading_time
+
+		total_transfer_time = total_transfer_time + first_transfer_time
+		logging.info("Total time to transfer : {}".format(total_transfer_time))
+		logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been transferred to CBUF. This fills CBUF")
+
+		return total_transfer_time
+	''' At the end of this, the first chunk that needs to computed is available in CBUF. '''
+
+''' Now that CBUF is full we can start the next stage. This will activate Pipe 2.
+	We will transfer data worth one atomic operation at a time. 
+
+	CBUF --> CSC --> CMAC --> Assembly group 
+
+	The first set of data will fill the pipeline first and subsequently, Pipe 2 would be activated. We will continue this process until the entire 
+	CBUF is emptied and the values are stored in Assembly group. 
+		
+		Important Note: At this stage we consider that Assembly group has enough size to store the results generated from the input data present in CBUF
+	Once the CBUF is emptied, Data from Assembly group will be transferred into Delivery Group 
+
+'''
+
+size_atomic_op = 8704  #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision 
+delay_csc = t0_CSC
+delay_cmac = t0_CMAC
+delay_adder_array = t0_CACC_Adder
+
+Assembly_reading_time = t0_Assembly
+Assembly_writing_time = t1_Assembly
+Delivery_reading_time = t0_Delivery
+Delivery_writing_time = t1_Delivery
+
+def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk):
+	''' calculate the time taken to transfer data from CBUF to Assembly group 
+		Note : CBUF  		  ------ active 
+		   	   CSC  		  ------ active
+		   	   CMAC 		  ------ active
+		   	   Assembly_Group ------ active 
+		   	   Other          ------ idle 
+
+		   	Important Note that Other ------ idle might not stay true when the L1_Pipe is established. '''
+
+	stages = {'dram':'idle', 'sram':'idle', 'cbuf':'active', 'cmac':'active', 'Assembly':'active', 'Delivery':'idle', 'SDP':'idle'}
+	logger.info("Active and Idle stages : {}".format(stages))
+
+	global size_atomic_op, CBUF_CHUNKS_FROM_SRAM,delay_csc, delay_cmac ,delay_adder_array,CBUF_Writing_time,CBUF_writing_bandwidth
+	chunk_in_cbuf = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]
+	total_atomic_reads_from_cbuf = math.ceil(chunk_in_cbuf/size_atomic_op)
 	
+	# Since the bandwidth of CBUF is limited to CBUF_writing_bandwidth = 256*8, and the required size for computation is per atomic_operations is size_atomic_op
+	# to send this data to CMAC would require multiple reads from CBUF 
+	# Therefore
+	total_reads_from_cbuf_for_one_atomic_op = math.ceil(size_atomic_op/CBUF_writing_bandwidth) # total reads from CBUF for one atomic operation data.
+	time_to_read_first_atomic_chunk_into_CMAC = CBUF_Writing_time + delay_csc + delay_cmac + delay_adder_array  # this is the first chunk of atomic data that can be read from CBUF due to its limited bandwidth
+	time_to_read_one_atomic_op = 0
+	logging.info("CBUF --> CSC --> CMAC --> Assembly_Group")
 
-
+	for i in range(total_reads_from_cbuf_for_one_atomic_op -1):
+		'''for the remaing chunks for this atomic operation, since the pipeline is setup we can simply add the time to read from CBUF '''
+		time_to_read_one_atomic_op += CBUF_Writing_time     # time taken to read one atomic operation equivalent of data into CMAC
 	
+	time_to_read_one_atomic_op = time_to_read_one_atomic_op + time_to_read_first_atomic_chunk_into_CMAC
+
+	''' At the end of this one set of atomic operations would be complete and result (partial sum) would be stored back in Assembly Group
+		Now we must continue this process to empty the CBUF and store all the results in CACC_Assembly_Group 
+		As the pipeline Pipe 2 is already setup after first atomic operation we can find the time taken by adding the total number of atomic operations that need to be computed
+		For each atomic operation we will add the  time_to_read_one_atomic_op time to the total time '''
+
+	total_transfer_time = 0 
+
+	for i in range(total_atomic_reads_from_cbuf-1):
+		'''since we have already computed the first atomic read'''
+		total_transfer_time += time_to_read_one_atomic_op
+
+	logging.info("Total time to transfer : {}".format(total_transfer_time))
+	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and stored in Assembly_Group. This empties CBUF")
+	
+	return total_transfer_time
 
 
+delay_truncation = t0_truncation
+size_partial_sum_generate_per_atomic_op = 544 # bits in case of int8
+Assembly_writing_bandwidth = Assembly_writing_bits 
+Assemby_data_size = 0
+''' Now that the result of the first chunk that was transferred to CBUF has been computed and result stored in CACC_Assembly_Group, we can begin to unload 
+	this data into Delivery Group. Total time taken to complete this procedure will be added to the inference time '''
 
+def time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk):
+	''' Data stored in Assembly is int34 for int8 data values, While data stored in Delivery is int32
 
+		The result of 1 1x1x64 o 1x1x64 is 1 partial sum = int8
+		Now this partial sum is extended and added with int34 to give 1 int34 value 
+		Therefore for 1 atomic operation the total size of partial sums generated = 16x34 = 544 bits
+	
+		Now total number of atomic operations for the given chunk in CBUF is = total_atomic_ops
+		Therefore size of Assembly_Group result data = total_atomic_ops * 544
 
+		SO we have the total Assembly Group size. This will be truncated to int32 by truncation array and finally stored into Delivery Group
+	
+		Note : Assembly Group ---- active
+			   Delivery Group ---- active
+			   Other          ---- idle 
+		While data is being transferred from Assembly to Delivery Group other operations would not be functional atleast for Pipe 2 and Pipe 3
+		'''
+	global Assembly_writing_bandwidth, delay_truncation, size_partial_sum_generate_per_atomic_op,CBUF_CHUNKS_FROM_SRAM,size_atomic_op
+	total_transfer_time = 0
+	# calculate the total size in Assembly from the first chunk in CBUF 
+	chunk_in_cbuf = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]
+	total_atomic_reads_from_cbuf = math.ceil(chunk_in_cbuf/size_atomic_op)
+	Assemby_data_size = total_atomic_reads_from_cbuf*size_partial_sum_generate_per_atomic_op
+	logging.info("Size of Assembly_Group {}".format(Assemby_data_size))
+	logging.info("Assembly_Group ---> Delivery_Group")
 
+	total_reads_from_assembly = math.ceil(Assemby_data_size/Assembly_writing_bandwidth)
+	time_first_read_from_assembly = Assembly_writing_time + delay_truncation + Delivery_reading_time
 
+	for i in range(total_reads_from_assembly -1):
+		total_transfer_time += Assembly_writing_time
+
+	total_transfer_time = total_transfer_time + time_first_read_from_assembly  
+
+	logging.info("Total time to transfer : {}".format(total_transfer_time))
+	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and stored in Delivery Group. This empties Assembly")
+	
+	return total_transfer_time
+
+''' Now that the Delivery Group is filled up we can start sending the to SDP for post- processing. Subsequenlty this data would be put back in on-chip SRAM
+
+Important Note: Since the Assembly is free, the Pipe 2 can also function concurrently with Pipe 3, here we have the option to pick which one is taking longer and start forming 
+the L1_Pipe. '''
+
+delay_sdp = t0_SDP
+delay_sdp_resnet = t1_SDP
+Delivery_Group_bandwidth = 512 # bits
+
+def time_Delivery_SRAM(resnet_flag):
+	''' calculate the time taken to transfer all data in Delivery SRAM to on-chip SRAM
+		Before that we calculate the size of data in Delivery Group. 
+		Since data stored in Assembly Group is int34 for int8 and int32 in Delivery 
+		We can calculate the size of data in Delivery Group through simple unitary method
+
+		takes resent_flag as input to determine if resnet operation needs to be computed. 
+	'''
+	global Assemby_data_size,Delivery_Group_bandwidth,Delivery_writing_time
+ 	
+ 	data_size_Delivery_Group = (Assemby_data_size*32)/34
+ 	total_reads_from_delivery = math.ceil(data_size_Delivery_Group/Delivery_Group_bandwidth)
+ 	logging.info("Size of Delivery_Group {}".format(data_size_Delivery_Group))
+	logging.info("Delivery_Group ---> SDP ---> SRAM")
+	if(!select_resnet(resnet_flag))
+		logging.info("Non Resnet Layer.. Proceeding..")
+	 	time_first_read_from_delivery = Delivery_writing_time + delay_sdp + SRAM_reading_time
+	 	total_transfer_time = 0
+
+	 	for i in range(total_reads_from_delivery-1):
+	 		total_transfer_time += Delivery_writing_time
+
+	 	total_transfer_time = total_transfer_time + time_first_read_from_delivery
+
+		logging.info("Total time to transfer : {}".format(total_transfer_time))
+		logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and we are now transferring this from Delivery Group back to SRAM. This empties Delivery Group")
+		return total_transfer_time
+	else:
+		logging.info("Resnet Layer.. Proceeding..")
+		'''if resnet operation has to be performed we will wait for that to have to switch to delay_sdp_resnet 
+		   Also at this point the DRAM would be transferring layer-2 values from MCIF to SDP buffer. This means that a separate pipeline would 
+		   be established which would require to transfer from DRAM -->SRAM and we will have to compute the time it takes for this operation to happen 
+		   Is it going to be parallel to Pipe1 + Delivery --> SDP 
+		   Also be careful that we would also be writing back to DRAM the copy of current layer being computed so there could a wait or lag associated with this. 
+		   MCIF can only write to or read from GDDR6 at a time. This means that there could be a wait period associated with resnet layers. Just think about this a little more
+		'''
+
+def select_resnet(flag):
+	if (flag == 1):
+		return True
+	return False
 
 
 
