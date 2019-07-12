@@ -69,8 +69,20 @@ The wait time in cases where multiple read/writes must happend with a memory uni
 The goal is that the program outputs an equation for computation of an image input. This can be done only when all the layers in the network have been computed. 
 
 
-									
- '''
+Until now the basic calculation model for first layer has been programmed (hopefully it works and is correct). The chunks that we have divided the layer into consitute the smallest unit of the layer computed at a time 
+Now I will determine how the pipeline works between these chunks. So far the pipeline for one chunk was examined. As we start computing more chunks in parallel we will form a the higher level pipeline as mentioned in the diagram above
+
+Important Note: It is assumed that the next layer of network wouldn't start until the previous one is totally complete. This is how the architecture was built
+
+On the discussion of Multiple Networks and their inference time computation : 
+	So far I have designed the calculation time for just one chunk of data of one layer. This chunk of data is fundamental to any network with Convolution operation as the key operation 
+	Don't know if it generalizes well for fc layers (maybe it does ???)
+
+	So for any network, the design of the code should be able to handle Convolution operation pretty well. 			
+
+Changes ======================
+1) DRAM is single port and SRAM is dual port so make changes if necessary					
+'''
 
 # lists holding the sizes in bits
 weights = []
@@ -121,7 +133,7 @@ GDDR6_writing_time = t0_GDDR6_512bits  # time taken to write 512 bits of data to
 GDDR6_reading_time = t1_GDDR6_512bits  # time taken to read 512 bits of data from GDDR6
 GDDR6_clock_freq = gddr6_clk
 
-SRAM_size = size_SRAM() + 2 #MB
+SRAM_size = size_SRAM() + 2 #MB  where did the 2 come from we need to figure this out 
 SRAM_writing_time = t0_SRAM_512bits    # time taken to write 512 bits of data to SRAM
 SRAM_reading_time = t1_SRAM_512bits    # time taken to write 512 bits of data to SRAM
 SRAM_clock_freq = sram_clk
@@ -295,7 +307,7 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 
 '''
 
-size_atomic_op = 8704  #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision 
+size_atomic_op = 8704   #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision.
 delay_csc = t0_CSC
 delay_cmac = t0_CMAC
 delay_adder_array = t0_CACC_Adder
@@ -407,6 +419,9 @@ the L1_Pipe. '''
 delay_sdp = t0_SDP
 delay_sdp_resnet = t1_SDP
 Delivery_Group_bandwidth = 512 # bits
+data_size_Delivery_Group = 0   # data size in bits (inside delivery group)
+precision_Delivery_SRAM = 32 # bits for all precisions 
+precision_Delivery_SRAM = 34 # bits for int8
 
 def time_Delivery_SRAM(resnet_flag):
 	''' calculate the time taken to transfer all data in Delivery SRAM to on-chip SRAM
@@ -418,7 +433,7 @@ def time_Delivery_SRAM(resnet_flag):
 	'''
 	global Assemby_data_size,Delivery_Group_bandwidth,Delivery_writing_time
  	
- 	data_size_Delivery_Group = (Assemby_data_size*32)/34
+ 	data_size_Delivery_Group = (Assemby_data_size*)/precision_Delivery_SRAM
  	total_reads_from_delivery = math.ceil(data_size_Delivery_Group/Delivery_Group_bandwidth)
  	logging.info("Size of Delivery_Group {}".format(data_size_Delivery_Group))
 	logging.info("Delivery_Group ---> SDP ---> SRAM")
@@ -450,15 +465,89 @@ def select_resnet(flag):
 		return True
 	return False
 
+precision_of_output_in_SRAM = 8 # bits 
+SRAM_reading_bandwidth = 512 # bits
+
+def time_SRAM_DRAM():
+	''' calculate time taken to transfer the output stored in SRAM coming from SDP. '''
+	global GDDR6_writing_time, SRAM_reading_time, data_size_Delivery_Group, precision_of_output_in_SRAM,SRAM_reading_bandwidth
+
+	Output_data_size_SRAM = (data_size_Delivery_Group*precision_of_output_in_SRAM)/precision_Delivery_SRAM
+	total_reads_from_SRAM = math.ceil(Output_data_size_SRAM/SRAM_reading_bandwidth)
+	time_first_read_from_SRAM = SRAM_reading_time + delay_bdma + GDDR6_writing_time
+	total_transfer_time = 0
+
+	logging.info("Size of Output data in SRAM {}".format(data_size_Delivery_Group))
+	logger.info("SRAM -> DRAM")
+
+	for i in range(total_reads_from_SRAM -1):
+		total_transfer_time += SRAM_reading_time
+
+	total_transfer_time = total_transfer_time + time_first_read_from_SRAM
+	
+	logging.info("Total time to transfer : {}".format(total_transfer_time))
+	logging.info("Copy of Output data from chunk in SRAM moved to DRAM")
+	
+	return total_transfer_time
+
+	
+
+''' Now various chunks of data would be computed in parallel as the pipeline builds up '''
+
+def level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk):  # cbuf means following_chunk starting point and delivery means current_chunk following time 
+	''' given that the first chunk of data has already started moving from Delivery Group back to SRAM we can begin the transfer the next chunk into CBUF
+		At this stage two operations are being performed 
+			1) reading from SRAM --> CBUF
+			2) writing to SDP --> SRAM 
+		Since SRAMIF can only handle one thing at a time we need to, the other operation will have to wait. 
+	
+	This one connects Pipe 1 and Pipe 2
+	we assume that two chunks are available now at this point 
+	current_chunk is in Pipe 2 
+	following_chunk is in Pipe 1
+	current_chunk is moving into SRAM as time progresses
+	following_chunk is moving into Assembly group as time progresses starting at SRAM (but while the current_chunk was being transferred from Assembly to Delivery
+	the following_chunk was being transferred from SRAM to CBUF, This is a seprate pipeline that we must consider. here too we pick the larger time and that would dependent on size of data)
+	
+	Also, for this we consider that following_chunk is already available in CBUF and current_chunk is available in Delivery_SRAM
+	Since this process repeates till CBUF empties and also that the process is parallel, we need to pick the slowest one between Pipe 1 and Pipe 2
+	
+	'''
+	current_chunk_time = time_Delivery_SRAM(resnet_flag)
+	following_chunk_time = time_CBUF_Assembly(index_sram_chunk,index_cbuf_chunk)
+	max_time = MAX(current_chunk_time, following_chunk_time)
+	return max_time
+
+''' Important Note : for the first chunk these two functions or the higher level pipeline makes no sense 
+	Only when we start the with the next chunk this becomes apparent '''
+
+def level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk):
+	''' this is very similar to the previous function only difference is that here we assume that 
+		following_chunk is available in sram and has to be moved to cbuf 
+		current_chunk is available in assembly group and has to be moved into delivery group
+
+		The rest of the logic remains the same 
+	'''
+	current_chunk_time = time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk)
+	following_chunk_time = time_SRAM_CBUF(index_sram_chunk,index_cbuf_chunk)
+	max_time = MAX(current_chunk_time, following_chunk_time)
+	return max_time
+
+def total_time_per_layer():
+	''' calculate the total time taken to complete a layer of Neural Network '''
+	pass
+	
+''' Since the above two situtation happen separately we need to add the total time '''
+''' The copy to DRAM from SRAM has to be sent 
+	DRAM is single port and SRAM is dual port which implies that when the current_chunk is written to SRAM completely 
+	We can either transfer the copy to DRAM first and then transfer the next set of chunk to CBUF from SRAM  or do the opposite either way there is no option 
+	So this means that the time taken to transfer to DRAM must be added to the total time  '''
 
 
-
-
-
-
-
-
-
+def MAX(t1, t2):
+	if (t1 >= t2):
+		return t1
+	return t2
 
 
 
