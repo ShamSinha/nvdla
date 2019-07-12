@@ -106,7 +106,95 @@
 	Once all the layers are computed for convolution we will arrive at an upsampling stage which is to be handled by the host processor during this period the NVDLA would stall and wait for the upsampled data to be loaded back into 
 	DRAM at which point further computation with this new data can proceed as it we were starting a new computation. 
 
+-->	An interesting to note is that now the data cube doesn't matter much. It is all about transferring the right amount of data for this kind of analysis. Keeping the nested 	  operation in mind obviously however the splitting is only relevant when we are trying to make the hardware work as expected, but to calculate time it is irrelevantconfirm just in case )
+
 	Since we are required to write into SRAM and also read from it to store a copy in DRAM we should opt for a dual port SRAM which will reduce the latency involved.
+
+	Let's analysis the pipe line better and see what are the things that need to happen simultaneously for this to work. 
+
+=============================================================================================================================================================================================================	
+	So Layer 1 :
+				t0    ---- >   t1
+					transfer input + weight to SRAM (0.5 MB)
+				
+				t1    ---- >   t2
+					transfer subset of input + weights to CBUF (SRAM_SUB 1) (CBUF_SUB 1)
+				
+				t2    ---- >   t3 ( T1 time total = t3 - t2)
+					-transfer one atomic operation data at a time ( 1x1x64 input and 1x1x64x16 kernel atomic cubes respectively) to CMAC
+					-Compute in CMAC
+					-store in CACC Assembly group 
+					-Repeat this process for 1 convolution operation ( channel operation) for all data in CBUF 
+				
+					Total time = T1 + number_of_atomic_ops_per_channel_op
+
+				t3 +  T1 + number_of_atomic_ops_per_channel_op  ---- >   t4		(T2 time for assembly -> delivery)
+					-transfer all data in Assembly group to Delivery group 
+
+				t4    ---- >   t5 (T3 time for pipe 3)
+					- begin transfer of data from Delivery group to SDP
+					- Compute in SDP (check for Resnet Operation)
+						if Resent:
+							include time taken for Resnet to complete 
+						else: 
+							transfer directly to SRAM on-chip
+					Commence next subset of input from CBUF to CMAC ( CBUF_SUB 2) while we are emptying Delivery SRAM
+					Time taken T0 = T3 (for first transfer) + MAX(T1,T3)
+						MAX():
+							if T3 > T1:
+								choose T3
+							else if T1 > T3 :
+								choose T3 + T2
+					This process will repeat until all subsets of input + feature data have been exausted (CBUF_SUB I) where I = {1,2,3,...,N}
+							The output being written to SRAM from SDP also involves a copy of the output being written to DRAM as a copy 
+								This is pipe 1 in reverse 
+									At this point we have combined all pipes 1 to 3 into a single super pipeline which functions for a given duration of time 
+
+									Here we pick time to be max of supermax_T = MAX_Super(T1,T3,T4) 			where T1 is pipe 3, T2 is pipe 2 and T4 is pipe 1
+									Thus we have 3 pipelines combined into one pipeline at this stage
+
+						This would mean we transfer data from SRAM -> CBUF when SRAM_SUB K is used up completely. Display percentage 
+							this is pipe 1 and the transfer time would be added to the total inference time.
+
+							Checkpoint in Code = The SRAM is now getting filled with values from the ouput of Layer 1
+												 Compute size of SRAM occupied with input data + output data + weights after each entry from SDP 
+					
+					As a result, we will have the total time taken to compute the entire image input data and 
+					finally the SRAM would be filled with the ouput of the first layer which is feed for second layer
+		Next Layer :		
+				t5   ---->    t6 
+					We will transfer the weight data from DRAM -> SRAM in sets as the size of kernels is bound to rise. 
+					Check if the input data is already cached in SRAM or needs to be moved into SRAM for the next convolution operation
+					if cached :
+							Transfer only weights in sets
+							Calculate the time taken DRAM -> SRAM
+							Repeat steps for above layer
+					else :
+							Transfer weights (set 1) + input data (when required, probably some of it is already cached in SRAM)
+							Calculate the time taken DRAM -> SRAM
+							Repeat steps for above layer
+							if more_input_required :
+								Transfer from DRAM -> SRAM 
+								Calculate time taken and add it to total inference time 
+					When one set of weights is complete transfer the next set of weights until all sets are exhausted
+						For each new set of weight the input data has to be feed again. So the copy that was stored in DRAM would be used
+						The entire time for all sets should be added based on steps for the Layer 1 description.
+			After all sets of kernel are completed, we will again have only the output of this layer in the on-chip SRAM ( as the feature size drops significantly in YOLOv3)
+			However the kernel size increases, so sets are important to construct 
+		
+		Now as computation progresses for the next layer we also need to perform Resnet operation 
+		So the copy of the output of layer previous to this would be used from DRAM. This would be arbitrated by MCIF that will transfer this data directly from DRAM -> SDP buffer
+		This would take some time T5 					(say)
+		We need to pick MAX(supermax_T, T5) 			(the data from DRAM to SDP might take longer that the time taken in the pipeline. Need to check this further)
+
+		Also now we are reading from DRAM and writing to DRAM (the copy of this layer)
+		However these two processes happen separately, so there should not be any wait time for accessing DRAM (confirm)
+
+
+		Finally repeat this whole process for all convolution operations 
+
+=============================================================================================================================================================================================================
+
 
 	Now for some big questions and final summary ---- 
 	1) What should be the size of SRAM?

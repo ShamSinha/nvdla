@@ -1,0 +1,5 @@
+2019-07-13 00:43:22,974 Active and Idle stages : {'dram': 'active', 'sram': 'active', 'cbuf': 'idle', 'cmac': 'idle', 'Assembly': 'idle', 'Delivery': 'idle', 'SDP': 'idle'}
+2019-07-13 00:43:22,975 DRAM -> SRAM
+2019-07-13 00:43:22,975 SRAM can fit all data... Proceeding...
+2019-07-13 00:43:22,976 Total time to transfer : 167730
+2019-07-13 00:43:22,976 At this point the data for Layer0 of YOLOv3 has been transferred to SRAM
