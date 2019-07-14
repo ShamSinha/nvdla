@@ -724,7 +724,7 @@ def total_inference_time():
 	resnet_flag = 0
 	cached_for_resnet = 0
 	logging.info("Calculating time for complete inference of image input")
-	for layer in range(layers-1):
+	for layer in range(layers):
 		if (layer%2 == 0 and layer != 0):
 			resent_flag = 1
 			cached_for_resnet = feature[layer-2]
