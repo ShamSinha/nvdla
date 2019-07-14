@@ -1,10 +1,17 @@
 #!/usr/local/bin/python3
-import sys 
-import math
-import logging 
-import traceback
-import timeit
-filename = __file__
+# -*- coding: utf-8 -*-
+
+# Ownership
+# Improve this section later
+# __author__ = “Aditya Prasad”
+# __copyright__ = “Copyright 2019, AI ACCELERATOR PROJECT”
+# __credits__ = [“Chen Haoji”, "Shubham Kumar", "Kundan Doiphode", "Others"]
+# __license__ = “Decide Later”
+# __version__ = “0.1.0”
+# __maintainer__ = “Digital Systems Lab, Hanyang University”
+# __email__ = “nvdlagroup@gmail.com”
+# __status__ = “Dev”
+
 ''' Given time taken to in each module of NVDLA along with the time between modules we can calculate the total time taken
 	to compute a layer in a neural network 
 
@@ -92,15 +99,16 @@ Changes ======================
 3) chunk_size_DRAM_SRAM was picked arbitrarily ( we can have better logic for this) ( maybe its not much of a problem anyway. Confirm)
 '''
 
+import sys 
+import math
+import logging 
+import traceback
+import timeit
+
 # lists holding the various sizes in bits
 weights = []
 feature = []
 total = []
-
-#function call stack trace
-
-WHITE_LIST = ['trade']      # Look for these words in the file path.
-EXCLUSIONS = ['<']          # Ignore <listcomp>, etc. in the function name.
 
 
 # logging 
@@ -110,6 +118,9 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
 t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits  =(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24)  # dummy values used now for debugging
+
+''' Important Note - input-size.txt = 100 lines
+					 weight-size.txt = 75 lines '''
 
 '''Non-Operation'''
 def size_SRAM():
@@ -138,7 +149,7 @@ def size_SRAM():
  
  	return (math.ceil(round(max_sum,3)))  # for the moment we take SRAM as 8 MB by adding 2.7 MB of additional storage space in on-chip SRAM
 
-# check that input and weight arrays are equal in length 
+# check that input and weight arrays are equal in length. This is not working properly 
 if(len(weights) == len(feature)):
 	logging.info("Yes there are equal.. Continuing.. ")
 else:
@@ -233,6 +244,7 @@ def time_DRAM_SRAM(direction, index_input):
 
 def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 	''' return SRAM_CHUNKS_FROM_DRAM for every new layer '''
+	
 	total_data_to_transfer = feature[index_input] + weights[index_input]
 	global SRAM_size, SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
 	total_chunks = math.ceil(total_data_to_transfer/chunk_size_DRAM_SRAM)
@@ -402,7 +414,7 @@ def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk):
 	logger.info("Active and Idle stages : {}".format(stages))
 
 	global size_atomic_op, CBUF_CHUNKS_FROM_SRAM,delay_csc, delay_cmac ,delay_adder_array,CBUF_Writing_time,CBUF_writing_bandwidth
-	print(index_sram_chunk, " ", index_cbuf_chunk)
+	#print(index_sram_chunk, " ", index_cbuf_chunk)
 
 	chunk_in_cbuf = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]
 	total_atomic_reads_from_cbuf = math.ceil(chunk_in_cbuf/size_atomic_op)
@@ -690,8 +702,8 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	total_chunks_from_DRAM_SRAM = length_SRAM_CHUNKS_FROM_DRAM(index_input)
 	total_chunks_from_SRAM_CBUF_per_SRAM_chunk = length_CBUF_CHUNKS_FROM_SRAM()
 	
-	print(total_chunks_from_DRAM_SRAM, " ", len(total_chunks_from_SRAM_CBUF_per_SRAM_chunk))
-	print(total_chunks_from_SRAM_CBUF_per_SRAM_chunk)
+	#print(total_chunks_from_DRAM_SRAM, " ", len(total_chunks_from_SRAM_CBUF_per_SRAM_chunk))
+	#print(total_chunks_from_SRAM_CBUF_per_SRAM_chunk)
 	print("---IN total_time_per_layer()---")
 	for i in range(total_chunks_from_DRAM_SRAM):
 		logging.info("Computing time for SRAM chunk {}".format(i))
@@ -699,7 +711,6 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
 			total_time_layer += total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
-		print(total_time_layer)
 	logging.info("Total time to transfer (---IN total_time_per_layer()---): {}".format(total_time_layer))
 	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.")
 	return total_time_layer
@@ -708,9 +719,10 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 def total_layers_in_network():
 	''' calculate total convolution layers in the network '''
 	counter = 0
-	with open('input-size.txt','r') as f:
+	with open('weight-size.txt','r') as f:
 		for line in f:
 			counter += 1
+	print(counter)
 	return counter
 
 '''Operation'''
