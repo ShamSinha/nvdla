@@ -3,9 +3,9 @@
 
 # Ownership
 # Improve this section later
-# __author__ = “Aditya Prasad”
+# __author__ = ""
 # __copyright__ = “Copyright 2019, AI ACCELERATOR PROJECT”
-# __credits__ = [“Chen Haoji”, "Shubham Kumar", "Kundan Doiphode", "Others"]
+# __credits__ = []
 # __license__ = “Decide Later”
 # __version__ = “0.1.0”
 # __maintainer__ = “Digital Systems Lab, Hanyang University”
@@ -105,6 +105,8 @@ import logging
 import traceback
 import timeit
 
+from upsampling import upsampling
+from softmax import softmax
 # lists holding the various sizes in bits
 weights = []
 feature = []
@@ -112,12 +114,12 @@ total = []
 
 
 # logging 
-logging.basicConfig(filename="pipe.log", 
+logging.basicConfig(filename="./pipe.log", 
                     format='%(asctime)s %(message)s',filemode='w') 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits  =(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24)  # dummy values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits  =(1,2,3,4,5,6,7,8,9,1,2,3,4,5,6,7,8,9,1,2,3,4,5,6)  # dummy values used now for debugging
 
 ''' Important Note - input-size.txt = 100 lines
 					 weight-size.txt = 75 lines '''
@@ -177,7 +179,7 @@ delay_bdma = t0_BDMA_20Deep			   # time spent in bdma (useful for first transfer
 SRAM_CHUNKS_FROM_DRAM = []  # stores the values for each chunk that will be transferred from DRAM --> SRAM
  
 '''Operation'''
-def time_DRAM_SRAM(direction, index_input):
+def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 	''' check for the direction in which the data should be transferred 
 		right means DRAM -> SRAM
 		left  means SRAM -> DRAM
@@ -204,10 +206,6 @@ def time_DRAM_SRAM(direction, index_input):
 			''' At the end of this all data for convolution is going to present in SRAM, now DRAM is idle'''
 
 			logger.info("SRAM can fit all data... Proceeding...")
-			logger.info("Generating chunks for SRAM...")
-			generate_chunks_for_sram(total_data_to_transfer)
-	
-			logger.info("chunks generated..")
 			total_chunks_to_read = total_data_to_transfer//chunks_read_size + total_data_to_transfer%chunks_read_size
 			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time  # time taken to transfer just the first chunk of 512 bits 
 
@@ -221,7 +219,7 @@ def time_DRAM_SRAM(direction, index_input):
 			total_transfer_time = total_transfer_time + transfer_time_first_chunk
 			logging.info("Total time to transfer : {}".format(total_transfer_time))
 			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")
-			return total_transfer_time
+	
 		
 		else:
 			''' since the whole data cannot be transferred to SRAM we need to split the data and transfer smaller amounts at a time 
@@ -229,18 +227,29 @@ def time_DRAM_SRAM(direction, index_input):
 				to split 
 				Note that the core logic for calculating time would remain the same '''
 			logger.info("SRAM cannot fit all data at once... Proceeding with smaller chunks...")
-			logger.info("Generating chunks for SRAM...")
-			generate_chunks_for_sram(total_data_to_transfer)
-			
-			logger.info("Generated chunks..")
-			
+			total_chunks_to_read = SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]//chunks_read_size + SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]%chunks_read_size
+			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time  # time taken to transfer just the first chunk of 512 bits 
 
+			# for the remaining chunks
+			for chunk in range(total_chunks_to_read-1):
+				# for the remaining chunks, since Pipe 1 is established now, the time taken now would be only as fast as the slowest component i.e. GDDR6 read time
+				# We could have multiplied, but for loop gives a better feel for transfer I think!
+				total_transfer_time += GDDR6_reading_time
+
+			# Now the total time taken can simply be added for first set of data to transfer into SRAM 
+			total_transfer_time = total_transfer_time + transfer_time_first_chunk
+			logging.info("Total time to transfer : {}".format(total_transfer_time))
+			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")
+		return total_transfer_time
+
+			
+		
 	elif direction == 'left':
 		''' write to code for SRAM to DRAM transfer and get the total time in this case '''
 		logger.info("Exiting... Invalid option")
 		sys.exit(0)
 
-	return dummy_time
+		return dummy_time
 
 def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 	''' return SRAM_CHUNKS_FROM_DRAM for every new layer '''
@@ -250,6 +259,7 @@ def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 	total_chunks = math.ceil(total_data_to_transfer/chunk_size_DRAM_SRAM)
 	generate_chunks_for_sram(total_data_to_transfer)
 	make_chunks_SRAM_CBUF()
+	print("CBUF_CHUNKS_FROM_SRAM: {}".format(CBUF_CHUNKS_FROM_SRAM))
 	return total_chunks
 
 
@@ -260,10 +270,16 @@ def generate_chunks_for_sram(size):
 	global SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
 	if(chunk_size_DRAM_SRAM < SRAM_size_in_bits):
 
-		total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
-		chunk_size = chunk_size_DRAM_SRAM
+		
+		if(size < chunk_size_DRAM_SRAM):
+			total_chunks = 1
+			chunk_size = size
+		else:
+			total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
+			chunk_size = chunk_size_DRAM_SRAM
 		for i in range(total_chunks):
 			SRAM_CHUNKS_FROM_DRAM.append(chunk_size)
+		print(SRAM_CHUNKS_FROM_DRAM)
 	else:
 		logging.info("No transfer. Chunk size (chunk_size_DRAM_SRAM) too big....")
 		sys.exit(0)
@@ -301,7 +317,7 @@ CBUF_CHUNKS_FROM_SRAM = []  # stores the values for each chunk that will be tran
 CBUF_SIZE = 524288 # size of CBUF in bits 
 
 ''' Important Note - Everytime we process a layer the values in arrays CBUF_CHUNKS_FROM_SRAM and SRAM_CHUNKS_FROM_DRAM need to be updated again. i.e. the arrays must be 
-	emptied and refilled for the new layer. However while working on one layer there can be used as they are defined'''
+	emptied and refilled for the new layer. However while working on one layer, no need to change'''
 
 '''Non-Operation'''
 def make_chunks_SRAM_CBUF():
@@ -328,8 +344,8 @@ def make_chunks_SRAM_CBUF():
 			cbuf_chunk_array.append(cbuf_chunk_size)
 
 		CBUF_CHUNKS_FROM_SRAM.append(cbuf_chunk_array)   # CBUF_CHUNKS_FROM_SRAM will be created when all the indices in SRAM_CHUNKS_FROM_DRAM have been parsed
-													 # Now, each individual values of CBUF_CHUNKS_FROM_SRAM will feed into the Pipe 2 
-	
+														 # Now, each individual values of CBUF_CHUNKS_FROM_SRAM will feed into the Pipe 2 
+	CBUF_CHUNKS_FROM_SRAM = CBUF_CHUNKS_FROM_SRAM[1:]
 
 
 def length_CBUF_CHUNKS_FROM_SRAM():
@@ -688,12 +704,12 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	total_time_SRAM_chunk = 0  # time taken to empty the chunk that was stored in SRAM from DRAM, these chunks are mentioned in SRAM_CHUNKS_FROM_DRAM array
 	'''first we compute the time to finish the chunk stored in SRAM '''
 	logging.info("Computing time for SRAM chunk {}".format(index_sram_chunk))
-	for i in range(len(CBUF_CHUNKS_FROM_SRAM[index_sram_chunk])-1):        # eg -> index_sram_chunk =0 picks the first sram chunk that we will transfer to CBUF
-		''' at the end of this the first chunk in SRAM has been computed
-			to complete the layer we must do this process again for all the chunks that have to be transferred from DRAM to SRAM '''
-		total_time_SRAM_chunk += time_subsequent_chunks
+	# for i in range(len(CBUF_CHUNKS_FROM_SRAM[index_sram_chunk])-1):        # eg -> index_sram_chunk =0 picks the first sram chunk that we will transfer to CBUF
+	# 	''' at the end of this the first chunk in SRAM has been computed
+	# 		to complete the layer we must do this process again for all the chunks that have to be transferred from DRAM to SRAM '''
+	# 	total_time_SRAM_chunk += time_subsequent_chunks
 
-	total_time_SRAM_chunk = total_time_SRAM_chunk + time_first_chunk
+	total_time_SRAM_chunk = time_subsequent_chunks + time_first_chunk
 	logging.info("Total time to transfer : {}".format(total_time_SRAM_chunk))
 	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.")
 	return total_time_SRAM_chunk
@@ -710,7 +726,7 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	for i in range(total_chunks_from_DRAM_SRAM):
 		print(i)
 		logging.info("Computing time for SRAM chunk {}".format(i))
-		total_time_layer += time_DRAM_SRAM(direction, index_input) 
+		total_time_layer += time_DRAM_SRAM(direction, index_input,i) 
 		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer
 		
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
@@ -728,7 +744,7 @@ def total_layers_in_network():
 			counter += 1
 	return counter
 
-Clock_freq = 3200000000   # 3.2 GHz
+Clock_freq = 2700000000   # 2.7 GHz
 '''Operation'''
 def total_inference_time():
 	'''calculate the total inference time 
@@ -748,6 +764,8 @@ def total_inference_time():
 				resent_flag = 1
 				cached_for_resnet = feature[layer-2]
 				logging.info("LAYER NUMBER : {}".format(layer + 1))
+				logging.info("Layer size: {}".format(weights[layer]+ feature[layer]))
+				
 				logging.info("Resnet flag: {0} , Cached output: {1}".format(resent_flag, cached_for_resnet))
 				layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  
 				time_inference += layer_time
@@ -756,15 +774,20 @@ def total_inference_time():
 			resnet_flag = 0
 			logging.info("LAYER NUMBER : {}".format(layer))
 			logging.info("Resnet flag: {0}".format(resnet_flag))
+			logging.info("Layer size: {}".format(weights[layer]+ feature[layer]))
+			
 			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)   
 			time_inference += layer_time
 			logging.info("Completed Layer..")
 		SRAM_CHUNKS_FROM_DRAM = []    # reinitialize after finishing a layer
 		CBUF_CHUNKS_FROM_SRAM = [[]]  # ---------------"--------------------
 
+	time_softmax = softmax()   		# assuming cpu clock freq = 3.2Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
+	time_upsampling = upsampling()  # ------------------------------------------"""------------------------------------------
 	time_sec = round(time_inference/Clock_freq, 3)
+	total_inference_time = time_sec + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
 	logging.info("TOTAL INFERENCE TIME (in Cycles): {}".format(time_inference))
-	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 3.2GHz) (in seconds): {}".format(time_sec))
+	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
 
 '''Non-Operation'''
@@ -820,19 +843,17 @@ def numerical_simulator():
 
 	'''
 	# Brute force 
-	sram_options = [8,10,12,14,16]
-	size_atomic_op_options = [8704, 16896, 25088, 33280, 41472]
-	chunk_size_DRAM_SRAM = []
-
+	# sram_options = [8,10,12,14,16]
+	# size_atomic_op_options = [8704, 16896, 25088, 33280, 41472]
+	# chunk_size_DRAM_SRAM = []
 
 
 def main():
 	'''call the total_inference_time() function to initiate the inference process '''
-	start = timeit.timeit()
 	total_inference_time()
-	end = timeit.timeit()
-	logging.info("Program Run time (Not related to inference time): {}".format(end-start))
-
 
 if __name__ == "__main__":
+	start = timeit.timeit()
 	main()
+	end = timeit.timeit()
+	logging.info("Program Run time (Not related to inference time): {}".format(end-start))

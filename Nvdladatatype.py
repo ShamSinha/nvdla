@@ -10,6 +10,7 @@
 # GET BACK TO THIS LATER, UNDERSTANDING WHAT SIZE MEANS IS IMPORTANT 
 # COULD USE sys.getsizeof() for the purpose of getting the size of the container + data pointed to inside the container
 
+import sys
 
 class Nvdladatatype():
 	''' define the datatype for input and weight data used in NVDLA '''

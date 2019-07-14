@@ -13,23 +13,28 @@ two upsample layers
 #https://pytorch.org/docs/stable/nn.html
 #https://www.aiuai.cn/aifarm605.html
 #https://www.cnblogs.com/xzcfightingup/p/7598293.html
+def upsampling():
+	#https://discuss.pytorch.org/t/transform-model-to-xxx-proto-failed/24353
+	input_1=torch.rand(1, 256, 13, 13)
+	#print("input", input_1)
+	#print(input_1.size())
+	input_2=torch.rand(1, 128, 26, 26)
 
-#https://discuss.pytorch.org/t/transform-model-to-xxx-proto-failed/24353
-input_1=torch.rand(1, 256, 13, 13)
-#print("input", input_1)
-#print(input_1.size())
-input_2=torch.rand(1, 128, 26, 26)
+	t1=time.time()    #start the time
+	#the first upsample layer
+	model=torch.nn.Upsample((26, 26), mode='bilinear', align_corners=True)
+	model(input_1)
+	#pre=model(input_1)
+	#print(pre)
+	#the second upsample layer
+	model=torch.nn.Upsample((52, 52), mode='bilinear', align_corners=True)
+	model(input_2)
 
-t1=time.time()    #start the time
-#the first upsample layer
-model=torch.nn.Upsample((26, 26), mode='bilinear', align_corners=True)
-model(input_1)
-#pre=model(input_1)
-#print(pre)
-#the second upsample layer
-model=torch.nn.Upsample((52, 52), mode='bilinear', align_corners=True)
-model(input_2)
+	t2=time.time()    #stop the time
+	T=t2-t1
+	return T         #print the total time
 
-t2=time.time()    #stop the time
-T=t2-t1
-print(T)          #print the total time
+if __name__ == '__main__':
+	
+	time = upsampling()
+	print(time)

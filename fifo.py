@@ -73,5 +73,13 @@ class Fifo():
 			return True
 		else:
 			return False
-		
+	
+	def is_full(self):
+		filled_flag = self.filled_length()
+		if filled_length == self.length :
+			return True
+		else:
+			return False
+
+
 

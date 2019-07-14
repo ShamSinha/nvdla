@@ -1,3 +1,6 @@
 datacube.py line 26: FIX here, n_atomic_* go to 0 when channel size < 64
 datacube.py line 70 BUG in  function
 matrix_concat.py zero extension is working however the cube structure implementation of zero extension needs to be added, also zero padding needs to be fixed
+pipe.py: It is possible that the output of the previous layerand the input of the next layer both are getting computed as they both are in SRAM (probably), so essentially a double computation is happening, Check  
+pipe.py: check SRAM portion again 
+pipe.py: make logging more clear

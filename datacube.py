@@ -11,10 +11,9 @@ import random
 import matrix_concat 
 import math
 class Datacube():
-	
-	atomic_5d = [[[[[]]]]]  # empty atomic cube data structure unique to every data cube 
-	
 
+	atomic_5d = [[[[[]]]]]  
+	
 	def __init__(self, width, height, channels, pres, pad=[0,0,0,0], n_cubes=1 ):
 		self.width = width
 		self.height = height
@@ -25,9 +24,9 @@ class Datacube():
 	
 	def define_precision(self):
 		if self.pres == 'int8':
-			pass
+			print('{:08b}'.format(10)) # use 8 bits to represent a number
 		elif self.pres == 'int16':
-			pass
+			print('{:016b}'.format(10)) # use 16 bits to represent a number
 		elif self.pres == 'fp16':
 			pass 
 		elif self.pres == 'fp32':
@@ -84,7 +83,6 @@ class Datacube():
 		surface_blocks = self.height*self.width
 		blocks = blocks//surface_blocks
 		cube_blocks = surface_blocks*blocks
-		print(surface_blocks, " ", cube_blocks)
 		#zero_concat = [[ [] for i in range(surface_blocks)] for j in range(self.n_cubes)]
 		for c_n in range(self.n_cubes):
 			for a_n in range(surface_blocks):

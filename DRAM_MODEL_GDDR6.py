@@ -1,5 +1,6 @@
 #!/usr/local/bin/python3
 # -*- coding: utf-8 -*-
+# DO THIS FOR WEIGHT DATA AS WELL
 import sys
 import logging
 import random
@@ -53,6 +54,8 @@ def input_data_GDDR6_channel_mapping(H,W,C,r,c,cell_size):
 			# log error here 
 			# exit with error code
 			sys.exit(1)
+		else:
+			logging.info("More than one banks were used to store data")
 	else:
 		print("data was mapped into channel successfully")
 		logging.info("data was mapped into channel successfully into channel")
@@ -103,7 +106,7 @@ def time_to_read_data_from_GDDR6(column,cells_required,total_sequences):
 	refresh_time = (tRCD+(column-1)*tCCD+tRTP+tRP)/rows_utilized
 	reading_time = rows_utilized*(tRCD+(column-1)*tCCD + tRTP + tRP+ tCL) + Refresh_time # cycles
 	reading_time = reading_time/split_between_channels(cells_required)
-	
+
 	return reading_time
 
 

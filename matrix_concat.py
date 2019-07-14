@@ -66,6 +66,9 @@ def matrix_concat(c,m_1,m_2,m_3):
 	
 	return concat_mat
 
+def select_atomic_cubes(m ):
+	''' choose the right set of atomic cubes to append zeros to'''
+
 def channel(m,n):
 	d_m = dimensions(m)
 	zero_concat = [[ [] for i in range(d_m[3])] for j in range(d_m[4])]

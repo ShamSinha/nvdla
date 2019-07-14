@@ -7,3 +7,7 @@ yu = bi%2048
 number_512 = math.ceil (yu/512)
 t = 2 + zheng*5 + number_512*2
 print(t)
+
+
+
+
