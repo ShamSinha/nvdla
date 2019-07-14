@@ -2,6 +2,9 @@
 import sys 
 import math
 import logging 
+import traceback
+
+filename = __file__
 ''' Given time taken to in each module of NVDLA along with the time between modules we can calculate the total time taken
 	to compute a layer in a neural network 
 
@@ -32,7 +35,7 @@ import logging
  	Pipe 4 -- Assembly Group -- > Delivery Group
  	Copy   -- SRAM -- > DRAM
 
-					 L2_pipe
+				 	L2_pipe
 					 /	  \
 					/      \
 				   /        \
@@ -94,13 +97,19 @@ weights = []
 feature = []
 total = []
 
+#function call stack trace
+
+WHITE_LIST = ['trade']      # Look for these words in the file path.
+EXCLUSIONS = ['<']          # Ignore <listcomp>, etc. in the function name.
+
+
 # logging 
 logging.basicConfig(filename="pipe.log", 
                     format='%(asctime)s %(message)s',filemode='w') 
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep=(10,20,30,40,50,60,70)  # dummy values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits  =(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24)  # dummy values used now for debugging
 
 '''Non-Operation'''
 def size_SRAM():
@@ -161,8 +170,9 @@ def time_DRAM_SRAM(direction, index_input):
 		   SRAM  ------ active
 		   Other ------ idle   
 	'''
+	print("///IN time_DRAM_SRAM()////")
 	dummy_time = 0 # garbage time (throw away later)
-	
+	global GDDR6_reading_time, weights, feature, SRAM_writing_time, delay_bdma
 	stages = {'dram':'active', 'sram':'active', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
 	logger.info("Active and Idle stages : {}".format(stages))
 	
@@ -170,7 +180,7 @@ def time_DRAM_SRAM(direction, index_input):
 
 	if direction == 'right':
 		logging.info("DRAM -> SRAM")
-		global GDDR6_reading_time, weights, feature, SRAM_writing_time, delay_bdma
+		
 		total_transfer_time = 0
 		
 		chunks_read_size = 512
@@ -210,9 +220,19 @@ def time_DRAM_SRAM(direction, index_input):
 
 	return dummy_time
 
+def length_SRAM_CHUNKS_FROM_DRAM(index_input):
+	''' return SRAM_CHUNKS_FROM_DRAM for every new layer '''
+	total_data_to_transfer = feature[index_input] + weights[index_input]
+	global SRAM_size, SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
+	total_chunks = math.ceil(total_data_to_transfer/chunk_size_DRAM_SRAM)
+
+	return total_chunks
+
+
 '''Non-Operation'''
 def generate_chunks_for_sram(size):
 	''' generate chunks and prepare SRAM_CHUNKS_FROM_DRAM '''
+	
 	global SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
 	total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
 	chunk_size = chunk_size_DRAM_SRAM
@@ -229,6 +249,7 @@ def can_sram_fit(total_size):
 		if no :
 			split the data now into smaller chunks and transfer small chunks that can be transferred 
 	'''
+	
 	denominator = 1024*1024*8 	# to get answer in MB
 	total_size = total_size / denominator
 	global SRAM_size, SRAM_CHUNKS_FROM_DRAM
@@ -255,12 +276,13 @@ CBUF_SIZE = 524288 # size of CBUF in bits
 	emptied and refilled for the new layer. However while working on one layer there can be used as they are defined'''
 
 '''Non-Operation'''
-def make_chunks_SRAM_CBUF(index_weights,index_feature):
+def make_chunks_SRAM_CBUF():
 	''' create the appropriate chunks that will be transferred to CBUF for computation
 		store the sizes in CBUF_CHUNKS_FROM_SRAM, this will be used later 
 		SRAM_SUB_I --> CBUF_CHUNKS_FROM_SRAM where I are all the chunks we must transfer from SRAM to CBUF over time 
 		Compute SRAM_SUB_I sizes. 
 	'''
+	
 	global CBUF_CHUNKS_FROM_SRAM, weights, feature, SRAM_CHUNKS_FROM_DRAM, CBUF_SIZE
 	
 	for count,sram_chunk in enumerate(SRAM_CHUNKS_FROM_DRAM):
@@ -280,6 +302,17 @@ def make_chunks_SRAM_CBUF(index_weights,index_feature):
 		CBUF_CHUNKS_FROM_SRAM.append(cbuf_chunk_array)   # CBUF_CHUNKS_FROM_SRAM will be created when all the indices in SRAM_CHUNKS_FROM_DRAM have been parsed
 														 # Now, each individual values of CBUF_CHUNKS_FROM_SRAM will feed into the Pipe 2 
 
+
+def length_CBUF_CHUNKS_FROM_SRAM():
+	''' return length of CBUF_CHUNKS_FROM_SRAM for every entry in a list '''
+	global CBUF_CHUNKS_FROM_SRAM
+	make_chunks_SRAM_CBUF()
+	CBUF_CHUNKS_FROM_SRAM_entries = []
+	for i in range(len(CBUF_CHUNKS_FROM_SRAM)):
+		length = len(CBUF_CHUNKS_FROM_SRAM[i])
+		CBUF_CHUNKS_FROM_SRAM_entries.append(length)
+	return CBUF_CHUNKS_FROM_SRAM_entries
+
 delay_cdma = t0_CDMA   # time spent for the first set of values transferred from SRAM to CDMA. Same idea as BDMA. More accuracy can be achieved later
 SRAM_writing_bandwidth = Writing_bits   
 CBUF_reading_bandwidth = 192*8 # bits to CBUF
@@ -297,23 +330,24 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 		   	   CBUF  ------ active
 		   	   Other ------ idle  
 		 '''
-		stages = {'dram':'idle', 'sram':'active', 'cbuf':'active', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
-		logger.info("Active and Idle stages : {}".format(stages))
-		
-		chunk_to_be_read = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]  # bits 
-		total_chunks_to_read = chunks_to_be_read/SRAM_writing_bandwidth   # total number of chunks we need to read from SRAM
-		total_transfer_time = 0
-		first_transfer_time = SRAM_writing_time + delay_cdma + CBUF_Reading_time
-		logging.info("SRAM --> CBUF")
-		
-		for chunk in range(total_chunks_to_read-1): # for the remainder of chunks we just add the time taken to read from SRAM
-			total_transfer_time += SRAM_reading_time
+	
+	stages = {'dram':'idle', 'sram':'active', 'cbuf':'active', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
+	logger.info("Active and Idle stages : {}".format(stages))
+	
+	chunk_to_be_read = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]  # bits 
+	total_chunks_to_read = chunks_to_be_read/SRAM_writing_bandwidth   # total number of chunks we need to read from SRAM
+	total_transfer_time = 0
+	first_transfer_time = SRAM_writing_time + delay_cdma + CBUF_Reading_time
+	logging.info("SRAM --> CBUF")
+	
+	for chunk in range(total_chunks_to_read-1): # for the remainder of chunks we just add the time taken to read from SRAM
+		total_transfer_time += SRAM_reading_time
 
-		total_transfer_time = total_transfer_time + first_transfer_time
-		logging.info("Total time to transfer : {}".format(total_transfer_time))
-		logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been transferred to CBUF. This fills CBUF")
+	total_transfer_time = total_transfer_time + first_transfer_time
+	logging.info("Total time to transfer : {}".format(total_transfer_time))
+	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been transferred to CBUF. This fills CBUF")
 
-		return total_transfer_time
+	return total_transfer_time
 	''' At the end of this, the first chunk that needs to computed is available in CBUF. '''
 
 ''' Now that CBUF is full we can start the next stage. This will activate Pipe 2.
@@ -349,7 +383,7 @@ def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk):
 		   	   Other          ------ idle 
 
 		   	Important Note that Other ------ idle might not stay true when the L1_Pipe is established. '''
-
+	
 	stages = {'dram':'idle', 'sram':'idle', 'cbuf':'active', 'cmac':'active', 'Assembly':'active', 'Delivery':'idle', 'SDP':'idle'}
 	logger.info("Active and Idle stages : {}".format(stages))
 
@@ -413,6 +447,7 @@ def time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk):
 			   Other          ---- idle 
 		While data is being transferred from Assembly to Delivery Group other operations would not be functional atleast for Pipe 2 and Pipe 3
 		'''
+	
 	global Assembly_writing_bandwidth, delay_truncation, size_partial_sum_generate_per_atomic_op,CBUF_CHUNKS_FROM_SRAM,size_atomic_op
 	total_transfer_time = 0
 	# calculate the total size in Assembly from the first chunk in CBUF 
@@ -459,55 +494,57 @@ def time_Delivery_SRAM(resnet_flag, cached_for_resnet):
 
 		takes resent_flag as input to determine if resnet operation needs to be computed. 
 	'''
+	'''if resnet operation has to be performed we will wait for that to have to switch to delay_sdp_resnet 
+	   Also at this point the DRAM would be transferring layer-2 values from MCIF to SDP buffer. This means that a separate pipeline would 
+	   be established which would require to transfer from DRAM -->SRAM and we will have to compute the time it takes for this operation to happen 
+	   Is it going to be parallel to Pipe1 + Delivery --> SDP 
+	   Also be careful that we would also be writing back to DRAM the copy of current layer being computed so there could a wait or lag associated with this. 
+	   MCIF can only write to or read from GDDR6 at a time. This means that there could be a wait period associated with resnet layers. Just think about this a little more
+	'''
+	''' For the resnet layer, we have to transfer the additional output of convolution operation from 2 layers back, this means when the first chunk is transferred from DRAM to SRAM
+		we can use the time taken for than chunk to go from SRAM -> CBUF -> CMAC -> Assembly -> Delivery -> SDP, to store some(How much?) data into SDP buffer
+		However for subsequent chunks we need to add the extra time it takes to fetch this data and move to SDP as we are also writing the results of the current SDP output 
+		back into DRAM. But at the same time we are trying to fetch the output of convolution layer that happened before from DRAM. Both operation cannot proceed simultaneously'''
+		# CHECK ONCE LATER
+	
 	global Assemby_data_size,Delivery_Group_bandwidth,Delivery_writing_time,GDDR6_reading_time,data_DRAM_SDP,SDP_internal_buffer_size
- 	
- 	data_size_Delivery_Group = (Assemby_data_size*)/precision_Delivery_SRAM
- 	total_reads_from_delivery = math.ceil(data_size_Delivery_Group/Delivery_Group_bandwidth)
- 	logging.info("Size of Delivery_Group {}".format(data_size_Delivery_Group))
+
+	data_size_Delivery_Group = (Assemby_data_size)/precision_Delivery_SRAM
+	total_reads_from_delivery = math.ceil(data_size_Delivery_Group/Delivery_Group_bandwidth)
+	logging.info("Size of Delivery_Group {}".format(data_size_Delivery_Group))
 	logging.info("Delivery_Group ---> SDP ---> SRAM")
-	if(!select_resnet(resnet_flag))
+	if(not select_resnet(resnet_flag)):
 		logging.info("Non Resnet Layer.. Proceeding..")
-	 	time_first_read_from_delivery = Delivery_writing_time + delay_sdp + SRAM_reading_time
-	 	total_transfer_time = 0
+		time_first_read_from_delivery = Delivery_writing_time + delay_sdp + SRAM_reading_time
+		total_transfer_time = 0
 
-	 	for i in range(total_reads_from_delivery-1):
-	 		total_transfer_time += Delivery_writing_time
+		for i in range(total_reads_from_delivery-1):
+			total_transfer_time += Delivery_writing_time
 
-	 	total_transfer_time = total_transfer_time + time_first_read_from_delivery
+		total_transfer_time = total_transfer_time + time_first_read_from_delivery
 
 		logging.info("Total time to transfer : {}".format(total_transfer_time))
 		logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and we are now transferring this from Delivery Group back to SRAM. This empties Delivery Group")
-		
+
 	else:
 		logging.info("Resnet Layer.. Proceeding..")
-		'''if resnet operation has to be performed we will wait for that to have to switch to delay_sdp_resnet 
-		   Also at this point the DRAM would be transferring layer-2 values from MCIF to SDP buffer. This means that a separate pipeline would 
-		   be established which would require to transfer from DRAM -->SRAM and we will have to compute the time it takes for this operation to happen 
-		   Is it going to be parallel to Pipe1 + Delivery --> SDP 
-		   Also be careful that we would also be writing back to DRAM the copy of current layer being computed so there could a wait or lag associated with this. 
-		   MCIF can only write to or read from GDDR6 at a time. This means that there could be a wait period associated with resnet layers. Just think about this a little more
-		'''
-		''' For the resnet layer, we have to transfer the additional output of convolution operation from 2 layers back, this means when the first chunk is transferred from DRAM to SRAM
-			we can use the time taken for than chunk to go from SRAM -> CBUF -> CMAC -> Assembly -> Delivery -> SDP, to store some(How much?) data into SDP buffer
-			However for subsequent chunks we need to add the extra time it takes to fetch this data and move to SDP as we are also writing the results of the current SDP output 
-			back into DRAM. But at the same time we are trying to fetch the output of convolution layer that happened before from DRAM. Both operation cannot proceed simultaneously'''
-		# CHECK ONCE LATER
+		
 		RDMA_reads_from_DRAM = SDP_internal_buffer_size/512  # reads to fill RMDA buffer in SDP
 		rdma_time_to_fetch_data_dram_sdp = GDDR6_reading_time*RDMA_reads_from_DRAM   # time to fetch 4KB data into SDP 
 		total_reads_from_dram = cached_for_resnet/SDP_internal_buffer_size		# need cached output from 2 layers back
 		time_first_read_from_delivery = Delivery_writing_time + delay_sdp_resnet + SRAM_reading_time
-	 	total_transfer_time = 0
+		total_transfer_time = 0
 
-	 	for i in range(total_reads_from_delivery-1):
-	 		if(Delivery_writing_time < rdma_time_to_fetch_data_dram_sdp):
-	 			total_transfer_time += rdma_time_to_fetch_data_dram_sdp
-	 		else:
-	 			total_transfer_time += Delivery_writing_time
-	 	total_transfer_time = total_transfer_time + time_first_read_from_delivery
+		for i in range(total_reads_from_delivery-1):
+			if(Delivery_writing_time < rdma_time_to_fetch_data_dram_sdp):
+				total_transfer_time += rdma_time_to_fetch_data_dram_sdp
+			else:
+				total_transfer_time += Delivery_writing_time
+		total_transfer_time = total_transfer_time + time_first_read_from_delivery
 
-	 	logging.info("Total time to transfer : {}".format(total_transfer_time))
+		logging.info("Total time to transfer : {}".format(total_transfer_time))
 		logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and we are now transferring this from Delivery Group back to SRAM. This empties Delivery Group")
-	
+
 	return total_transfer_time
 
 '''Non-Operation'''
@@ -522,6 +559,7 @@ SRAM_reading_bandwidth = 512 # bits
 '''Operation'''
 def time_SRAM_DRAM():
 	''' calculate time taken to transfer the output stored in SRAM coming from SDP. '''
+	
 	global GDDR6_writing_time, SRAM_reading_time, data_size_Delivery_Group, precision_of_output_in_SRAM,SRAM_reading_bandwidth
 
 	Output_data_size_SRAM = (data_size_Delivery_Group*precision_of_output_in_SRAM)/precision_Delivery_SRAM
@@ -565,6 +603,7 @@ def level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chu
 	Since this process repeates till CBUF empties and also that the process is parallel, we need to pick the slowest one between Pipe 1 and Pipe 2
 	
 	'''
+	
 	current_chunk_time = time_Delivery_SRAM(resnet_flag,cached_for_resnet)
 	following_chunk_time = time_CBUF_Assembly(index_sram_chunk,index_cbuf_chunk)
 	max_time = MAX(current_chunk_time, following_chunk_time)
@@ -581,6 +620,7 @@ def level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk):
 
 		The rest of the logic remains the same 
 	'''
+	
 	current_chunk_time = time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk)
 	following_chunk_time = time_SRAM_CBUF(index_sram_chunk,index_cbuf_chunk)
 	max_time = MAX(current_chunk_time, following_chunk_time)
@@ -603,6 +643,8 @@ def MAX(t1, t2):
 '''Operation'''
 def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram_chunk,index_cbuf_chunk):
 	''' calculate the total time taken to complete a chunk present in SRAM '''
+	
+	check_sram_overflow(index_sram_chunk)
 	pipe_2_3_time = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet)
 	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)
 	copy_time = time_SRAM_DRAM()
@@ -624,15 +666,18 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 '''Operation'''
 def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	'''calculate the total time to finish one layer'''
+	
 	total_time_layer = 0
-	total_chunks_from_DRAM_SRAM = len(SRAM_CHUNKS_FROM_DRAM)
-	total_chunks_from_SRAM_CBUF = len(CBUF_CHUNKS_FROM_SRAM)
-	logging.info("Computing time for SRAM chunk {}".format(index_sram_chunk))
+	total_chunks_from_DRAM_SRAM = length_SRAM_CHUNKS_FROM_DRAM(index_input)
+	total_chunks_from_SRAM_CBUF_per_SRAM_chunk = length_CBUF_CHUNKS_FROM_SRAM()
+	print("---IN total_time_per_layer()---")
 	for i in range(total_chunks_from_DRAM_SRAM):
-			total_time_layer += time_DRAM_SRAM(direction, index_input) 
-		for j in range(total_chunks_from_SRAM_CBUF): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer
+		logging.info("Computing time for SRAM chunk {}".format(i))
+		total_time_layer += time_DRAM_SRAM(direction, index_input) 
+		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer
 			total_time_layer += total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
-	logging.info("Total time to transfer : {}".format(total_time_layer))
+		print(total_time_layer)
+	logging.info("Total time to transfer (---IN total_time_per_layer()---): {}".format(total_time_layer))
 	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.")
 	return total_time_layer
 
@@ -649,8 +694,9 @@ def total_layers_in_network():
 def total_inference_time():
 	'''calculate the total inference time 
 	   total number of convolution layers in the Network  = '''
-	global CBUF_CHUNKS_FROM_SRAM, SRAM_CHUNKS_FROM_DRAM
+	global SRAM_CHUNKS_FROM_DRAM,CBUF_CHUNKS_FROM_SRAM
 	layers = total_layers_in_network()
+	logging.info("Number of layers in Network {}".format(layers))
 	time_inference = 0
 	resnet_flag = 0
 	cached_for_resnet = 0
@@ -659,16 +705,20 @@ def total_inference_time():
 		if (layer%2 == 0 and layer != 0):
 			resent_flag = 1
 			cached_for_resnet = feature[layer-2]
-			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  # complete
+			logging.info("Resnet flag: {0} , Cached output: {1}".format(resent_flag, cached_for_resnet))
+			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  
 			time_inference += layer_time
+			logging.info("Completed Layer..")
 		else:
 			resnet_flag = 0
-			layer_time = total_time_per_layer('right',resent_flag,layer,cached_for_resnet)   # complete
+			logging.info("Resnet flag: {0}".format(resnet_flag))
+			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)   
 			time_inference += layer_time
+			logging.info("Completed Layer..")
 		SRAM_CHUNKS_FROM_DRAM = []    # reinitialize after finishing a layer
 		CBUF_CHUNKS_FROM_SRAM = [[]]  # ---------------"--------------------
-	logging.info("Total time to for inference : {}".format(time_inference))
-	logging.info("Completed inference of image input successfully!!!")
+	logging.info("TOTAL INFERENCE TIME : {}".format(time_inference))
+	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
 
 '''Non-Operation'''
 def update_sram(index_sram_chunk):
@@ -728,8 +778,9 @@ def numerical_simulator():
 
 def main():
 	'''call the total_inference_time() function to initiate the inference process '''
+	
+	total_inference_time()
 
-	pass
 
 if __name__ == "__main__":
 	main()

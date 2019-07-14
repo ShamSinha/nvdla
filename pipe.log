@@ -1,5 +1,28 @@
-2019-07-13 00:43:22,974 Active and Idle stages : {'dram': 'active', 'sram': 'active', 'cbuf': 'idle', 'cmac': 'idle', 'Assembly': 'idle', 'Delivery': 'idle', 'SDP': 'idle'}
-2019-07-13 00:43:22,975 DRAM -> SRAM
-2019-07-13 00:43:22,975 SRAM can fit all data... Proceeding...
-2019-07-13 00:43:22,976 Total time to transfer : 167730
-2019-07-13 00:43:22,976 At this point the data for Layer0 of YOLOv3 has been transferred to SRAM
+2019-07-14 17:27:19,434 Number of layers in Network 100
+2019-07-14 17:27:19,435 Calculating time for complete inference of image input
+2019-07-14 17:27:19,435 Resnet flag: 0
+2019-07-14 17:27:19,435 Computing time for SRAM chunk 0
+2019-07-14 17:27:19,435 Active and Idle stages : {'dram': 'active', 'sram': 'active', 'cbuf': 'idle', 'cmac': 'idle', 'Assembly': 'idle', 'Delivery': 'idle', 'SDP': 'idle'}
+2019-07-14 17:27:19,435 DRAM -> SRAM
+2019-07-14 17:27:19,435 SRAM_CHUNKS_FROM_DRAM holds just the total_size of feature + weights : 0.495941162109375
+2019-07-14 17:27:19,435 SRAM can fit all data... Proceeding...
+2019-07-14 17:27:19,436 Total time to transfer : 16773
+2019-07-14 17:27:19,436 At this point the data for Layer 0 of YOLOv3 has been transferred to SRAM
+2019-07-14 17:27:19,436 Total time to transfer (---IN total_time_per_layer()---): 16773
+2019-07-14 17:27:19,436 At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.
+2019-07-14 17:27:19,436 Completed Layer..
+2019-07-14 17:27:19,436 Resnet flag: 0
+2019-07-14 17:27:19,436 Computing time for SRAM chunk 0
+2019-07-14 17:27:19,436 Active and Idle stages : {'dram': 'active', 'sram': 'active', 'cbuf': 'idle', 'cmac': 'idle', 'Assembly': 'idle', 'Delivery': 'idle', 'SDP': 'idle'}
+2019-07-14 17:27:19,436 DRAM -> SRAM
+2019-07-14 17:27:19,436 SRAM_CHUNKS_FROM_DRAM holds just the total_size of feature + weights : 5.298828125
+2019-07-14 17:27:19,436 SRAM can fit all data... Proceeding...
+2019-07-14 17:27:19,444 Total time to transfer : 173643
+2019-07-14 17:27:19,444 At this point the data for Layer 1 of YOLOv3 has been transferred to SRAM
+2019-07-14 17:27:19,444 Computing time for SRAM chunk 1
+2019-07-14 17:27:19,444 Active and Idle stages : {'dram': 'active', 'sram': 'active', 'cbuf': 'idle', 'cmac': 'idle', 'Assembly': 'idle', 'Delivery': 'idle', 'SDP': 'idle'}
+2019-07-14 17:27:19,444 DRAM -> SRAM
+2019-07-14 17:27:19,444 SRAM_CHUNKS_FROM_DRAM holds just the total_size of feature + weights : 5.298828125
+2019-07-14 17:27:19,444 SRAM can fit all data... Proceeding...
+2019-07-14 17:27:19,453 Total time to transfer : 173643
+2019-07-14 17:27:19,453 At this point the data for Layer 1 of YOLOv3 has been transferred to SRAM
