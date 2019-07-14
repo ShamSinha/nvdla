@@ -258,11 +258,15 @@ def generate_chunks_for_sram(size):
 	''' generate chunks and prepare SRAM_CHUNKS_FROM_DRAM '''
 	
 	global SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
-	total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
-	chunk_size = chunk_size_DRAM_SRAM
-	for i in range(total_chunks):
-		SRAM_CHUNKS_FROM_DRAM.append(chunk_size)
+	if(chunk_size_DRAM_SRAM < SRAM_size_in_bits):
 
+		total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
+		chunk_size = chunk_size_DRAM_SRAM
+		for i in range(total_chunks):
+			SRAM_CHUNKS_FROM_DRAM.append(chunk_size)
+	else:
+		logging.info("No transfer. Chunk size (chunk_size_DRAM_SRAM) too big....")
+		sys.exit(0)
 
 ''' Non-Operation '''
 def can_sram_fit(total_size):
@@ -278,7 +282,7 @@ def can_sram_fit(total_size):
 	total_size = total_size / denominator
 	global SRAM_size, SRAM_CHUNKS_FROM_DRAM
 	if(SRAM_size >= total_size):
-		logger.info("SRAM_CHUNKS_FROM_DRAM holds just the total_size of feature + weights : {}".format(total_size))
+		logger.info("SRAM_CHUNKS_FROM_DRAM holds the total_size of feature + weights : {} MB".format(total_size))
 		SRAM_CHUNKS_FROM_DRAM.append(total_size*denominator)
 		return True
 	return False
@@ -684,12 +688,12 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	total_time_SRAM_chunk = 0  # time taken to empty the chunk that was stored in SRAM from DRAM, these chunks are mentioned in SRAM_CHUNKS_FROM_DRAM array
 	'''first we compute the time to finish the chunk stored in SRAM '''
 	logging.info("Computing time for SRAM chunk {}".format(index_sram_chunk))
-	# for i in range(len(CBUF_CHUNKS_FROM_SRAM[index_sram_chunk])-1):        # eg -> index_sram_chunk =0 picks the first sram chunk that we will transfer to CBUF
-	# 	''' at the end of this the first chunk in SRAM has been computed
-	# 		to complete the layer we must do this process again for all the chunks that have to be transferred from DRAM to SRAM '''
-	# 	total_time_SRAM_chunk += time_subsequent_chunks
+	for i in range(len(CBUF_CHUNKS_FROM_SRAM[index_sram_chunk])-1):        # eg -> index_sram_chunk =0 picks the first sram chunk that we will transfer to CBUF
+		''' at the end of this the first chunk in SRAM has been computed
+			to complete the layer we must do this process again for all the chunks that have to be transferred from DRAM to SRAM '''
+		total_time_SRAM_chunk += time_subsequent_chunks
 
-	total_time_SRAM_chunk = time_subsequent_chunks + time_first_chunk
+	total_time_SRAM_chunk = total_time_SRAM_chunk + time_first_chunk
 	logging.info("Total time to transfer : {}".format(total_time_SRAM_chunk))
 	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.")
 	return total_time_SRAM_chunk
@@ -702,13 +706,13 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	total_chunks_from_DRAM_SRAM = length_SRAM_CHUNKS_FROM_DRAM(index_input)
 	total_chunks_from_SRAM_CBUF_per_SRAM_chunk = length_CBUF_CHUNKS_FROM_SRAM()
 	
-	#print(total_chunks_from_DRAM_SRAM, " ", len(total_chunks_from_SRAM_CBUF_per_SRAM_chunk))
-	#print(total_chunks_from_SRAM_CBUF_per_SRAM_chunk)
 	print("---IN total_time_per_layer()---")
 	for i in range(total_chunks_from_DRAM_SRAM):
+		print(i)
 		logging.info("Computing time for SRAM chunk {}".format(i))
 		total_time_layer += time_DRAM_SRAM(direction, index_input) 
 		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer
+		
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
 			total_time_layer += total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
 	logging.info("Total time to transfer (---IN total_time_per_layer()---): {}".format(total_time_layer))
@@ -722,14 +726,16 @@ def total_layers_in_network():
 	with open('weight-size.txt','r') as f:
 		for line in f:
 			counter += 1
-	print(counter)
 	return counter
 
+Clock_freq = 3200000000   # 3.2 GHz
 '''Operation'''
 def total_inference_time():
 	'''calculate the total inference time 
-	   total number of convolution layers in the Network  = '''
-	global SRAM_CHUNKS_FROM_DRAM,CBUF_CHUNKS_FROM_SRAM
+	   total number of convolution layers in the Network
+	   Resnet configured every 2 layers , not the case in YOLOv3(fix this later)'''
+	global SRAM_CHUNKS_FROM_DRAM,CBUF_CHUNKS_FROM_SRAM,Clock_freq
+
 	layers = total_layers_in_network()
 	logging.info("Number of layers in Network {}".format(layers))
 	time_inference = 0
@@ -737,14 +743,15 @@ def total_inference_time():
 	cached_for_resnet = 0
 	logging.info("Calculating time for complete inference of image input")
 	for layer in range(layers):
-		if (layer%2 == 0 and layer != 0):
-			resent_flag = 1
-			cached_for_resnet = feature[layer-2]
-			logging.info("LAYER NUMBER : {}".format(layer))
-			logging.info("Resnet flag: {0} , Cached output: {1}".format(resent_flag, cached_for_resnet))
-			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  
-			time_inference += layer_time
-			logging.info("Completed Layer..")
+		if(layer <51):	
+			if (layer%2 == 0 and layer > 4):
+				resent_flag = 1
+				cached_for_resnet = feature[layer-2]
+				logging.info("LAYER NUMBER : {}".format(layer + 1))
+				logging.info("Resnet flag: {0} , Cached output: {1}".format(resent_flag, cached_for_resnet))
+				layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  
+				time_inference += layer_time
+				logging.info("Completed Layer..")
 		else:
 			resnet_flag = 0
 			logging.info("LAYER NUMBER : {}".format(layer))
@@ -754,7 +761,10 @@ def total_inference_time():
 			logging.info("Completed Layer..")
 		SRAM_CHUNKS_FROM_DRAM = []    # reinitialize after finishing a layer
 		CBUF_CHUNKS_FROM_SRAM = [[]]  # ---------------"--------------------
-	logging.info("TOTAL INFERENCE TIME : {}".format(time_inference))
+
+	time_sec = round(time_inference/Clock_freq, 3)
+	logging.info("TOTAL INFERENCE TIME (in Cycles): {}".format(time_inference))
+	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 3.2GHz) (in seconds): {}".format(time_sec))
 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
 
 '''Non-Operation'''
@@ -809,7 +819,10 @@ def numerical_simulator():
 	   We can use the Perceptron model to find the right parameters for SRAM, CBUF,MAC. 
 
 	'''
-	pass
+	# Brute force 
+	sram_options = [8,10,12,14,16]
+	size_atomic_op_options = [8704, 16896, 25088, 33280, 41472]
+	chunk_size_DRAM_SRAM = []
 
 
 
@@ -818,7 +831,7 @@ def main():
 	start = timeit.timeit()
 	total_inference_time()
 	end = timeit.timeit()
-	logging.info("Time elapsed : {}".format(start-end))
+	logging.info("Program Run time (Not related to inference time): {}".format(end-start))
 
 
 if __name__ == "__main__":
