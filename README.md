@@ -1,1 +1,1 @@
-Modelling Pipeline for NVDLA pipeline
+Modelling Pipeline for NVDLA Accelerator
