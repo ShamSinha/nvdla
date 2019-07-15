@@ -169,7 +169,7 @@ GDDR6_clock_freq = gddr6_clk
 
 SRAM_size = size_SRAM() + 2 #MB  where did the 2 come from we need to figure this out
 SRAM_size_in_bits = SRAM_size*1024*1024 # sram size in bits 
-chunk_size_DRAM_SRAM = 5*1024*1024      # arbitrary amount of data to transfer into SRAM from DRAM ( find a better way) this is because we will also be storing output from this layer into SRAM which should not overflow
+chunk_size_DRAM_SRAM = 1*1024*1024      # = SRAM_size_in_bits - previous_output_in_SRAM or total_data_to_transfer (<SRAM_size_in_bits)
 SRAM_writing_time = t0_SRAM_512bits    # time taken to write 512 bits of data to SRAM
 SRAM_reading_time = t1_SRAM_512bits    # time taken to write 512 bits of data to SRAM
 SRAM_clock_freq = sram_clk
@@ -177,7 +177,9 @@ SRAM_clock_freq = sram_clk
 delay_bdma = t0_BDMA_20Deep			   # time spent in bdma (useful for first transfer) difference between how long it takes for the first entry of sequence from GDDR6 to cross BDMA
 
 SRAM_CHUNKS_FROM_DRAM = []  # stores the values for each chunk that will be transferred from DRAM --> SRAM
- 
+
+previous_output_in_SRAM = 0 # initially previous output is zero
+
 '''Operation'''
 def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 	''' check for the direction in which the data should be transferred 
@@ -219,8 +221,7 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 			total_transfer_time = total_transfer_time + transfer_time_first_chunk
 			logging.info("Total time to transfer : {}".format(total_transfer_time))
 			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")
-	
-		
+			
 		else:
 			''' since the whole data cannot be transferred to SRAM we need to split the data and transfer smaller amounts at a time 
 				refer to the pseudo code to figure this out as there are certain other things that need to be taken care of before we decide how to and how much
@@ -239,27 +240,30 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 			# Now the total time taken can simply be added for first set of data to transfer into SRAM 
 			total_transfer_time = total_transfer_time + transfer_time_first_chunk
 			logging.info("Total time to transfer : {}".format(total_transfer_time))
-			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")
-		return total_transfer_time
-
-			
+			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")		
 		
 	elif direction == 'left':
 		''' write to code for SRAM to DRAM transfer and get the total time in this case '''
 		logger.info("Exiting... Invalid option")
 		sys.exit(0)
 
-		return dummy_time
+	return total_transfer_time
 
+'''Non-Operaton'''
 def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 	''' return SRAM_CHUNKS_FROM_DRAM for every new layer '''
 	
 	total_data_to_transfer = feature[index_input] + weights[index_input]
-	global SRAM_size, SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
-	total_chunks = math.ceil(total_data_to_transfer/chunk_size_DRAM_SRAM)
+	global SRAM_size_in_bits,previous_output_in_SRAM
+	if (index_input == 0):
+		remaining_SRAM_space = total_data_to_transfer
+	else:
+		remaining_SRAM_space = SRAM_size_in_bits - previous_output_in_SRAM
+
+	total_chunks = math.ceil(total_data_to_transfer/remaining_SRAM_space)
 	generate_chunks_for_sram(total_data_to_transfer)
 	make_chunks_SRAM_CBUF()
-	print("CBUF_CHUNKS_FROM_SRAM: {}".format(CBUF_CHUNKS_FROM_SRAM))
+	#print("CBUF_CHUNKS_FROM_SRAM: {}".format(CBUF_CHUNKS_FROM_SRAM))
 	return total_chunks
 
 
@@ -267,11 +271,13 @@ def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 def generate_chunks_for_sram(size):
 	''' generate chunks and prepare SRAM_CHUNKS_FROM_DRAM '''
 	
-	global SRAM_CHUNKS_FROM_DRAM,chunk_size_DRAM_SRAM
-	if(chunk_size_DRAM_SRAM < SRAM_size_in_bits):
+	global SRAM_CHUNKS_FROM_DRAM,previous_output_in_SRAM,SRAM_size_in_bits
 
+	remaining_SRAM_space = SRAM_size_in_bits - previous_output_in_SRAM
+	print("----------", remaining_SRAM_space, " ", previous_output_in_SRAM)
+	if(remaining_SRAM_space <= SRAM_size_in_bits):  # this will always be true
 		
-		if(size < chunk_size_DRAM_SRAM):
+		if(size < remaining_SRAM_space):
 			total_chunks = 1
 			chunk_size = size
 		else:
@@ -279,7 +285,7 @@ def generate_chunks_for_sram(size):
 			chunk_size = chunk_size_DRAM_SRAM
 		for i in range(total_chunks):
 			SRAM_CHUNKS_FROM_DRAM.append(chunk_size)
-		print(SRAM_CHUNKS_FROM_DRAM)
+		#print(SRAM_CHUNKS_FROM_DRAM)
 	else:
 		logging.info("No transfer. Chunk size (chunk_size_DRAM_SRAM) too big....")
 		sys.exit(0)
@@ -496,7 +502,7 @@ def time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk):
 		While data is being transferred from Assembly to Delivery Group other operations would not be functional atleast for Pipe 2 and Pipe 3
 		'''
 	
-	global Assembly_writing_bandwidth, delay_truncation, size_partial_sum_generate_per_atomic_op,CBUF_CHUNKS_FROM_SRAM,size_atomic_op
+	global Assembly_writing_bandwidth, delay_truncation, size_partial_sum_generate_per_atomic_op,CBUF_CHUNKS_FROM_SRAM,size_atomic_op, Assemby_data_size
 	total_transfer_time = 0
 	# calculate the total size in Assembly from the first chunk in CBUF 
 	chunk_in_cbuf = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]
@@ -557,7 +563,8 @@ def time_Delivery_SRAM(resnet_flag, cached_for_resnet):
 	
 	global Assemby_data_size,Delivery_Group_bandwidth,Delivery_writing_time,GDDR6_reading_time,data_DRAM_SDP,SDP_internal_buffer_size
 
-	data_size_Delivery_Group = (Assemby_data_size)/precision_Delivery_SRAM
+	data_size_Delivery_Group = (Assemby_data_size*8)/precision_Delivery_SRAM
+
 	total_reads_from_delivery = math.ceil(data_size_Delivery_Group/Delivery_Group_bandwidth)
 	logging.info("Size of Delivery_Group {}".format(data_size_Delivery_Group))
 	logging.info("Delivery_Group ---> SDP ---> SRAM")
@@ -593,7 +600,7 @@ def time_Delivery_SRAM(resnet_flag, cached_for_resnet):
 		logging.info("Total time to transfer : {}".format(total_transfer_time))
 		logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and we are now transferring this from Delivery Group back to SRAM. This empties Delivery Group")
 
-	return total_transfer_time
+	return total_transfer_time, data_size_Delivery_Group
 
 '''Non-Operation'''
 def select_resnet(flag):
@@ -614,15 +621,13 @@ def time_SRAM_DRAM():
 	total_reads_from_SRAM = math.ceil(Output_data_size_SRAM/SRAM_reading_bandwidth)
 	time_first_read_from_SRAM = SRAM_reading_time + delay_bdma + GDDR6_writing_time
 	total_transfer_time = 0
-
 	logging.info("Size of Output data in SRAM {}".format(data_size_Delivery_Group))
 	logger.info("SRAM -> DRAM")
 
 	for i in range(total_reads_from_SRAM -1):
 		total_transfer_time += SRAM_reading_time
 
-	total_transfer_time = total_transfer_time + time_first_read_from_SRAM
-	
+	total_transfer_time = total_transfer_time + time_first_read_from_SRAM	
 	logging.info("Total time to transfer : {}".format(total_transfer_time))
 	logging.info("Copy of Output data from chunk in SRAM moved to DRAM")
 	
@@ -652,11 +657,11 @@ def level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chu
 	
 	'''
 	pipe_picked = ["Delivery to SRAM", "CBUF to Assembly"]
-	current_chunk_time = time_Delivery_SRAM(resnet_flag,cached_for_resnet)
+	current_chunk_time, output_CBUF_chunk = time_Delivery_SRAM(resnet_flag,cached_for_resnet)
 	following_chunk_time = time_CBUF_Assembly(index_sram_chunk,index_cbuf_chunk)
 	max_time, pipe = MAX(current_chunk_time, following_chunk_time, pipe_picked)
 	logging.info("Max time picked was: {0} which corresponds to {1}".format(max_time, pipe))
-	return max_time
+	return max_time, output_CBUF_chunk
 
 ''' Important Note : for the first chunk these two functions or the higher level pipeline makes no sense 
 	Only when we start the with the next chunk this becomes apparent '''
@@ -695,7 +700,7 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	''' calculate the total time taken to complete a chunk present in SRAM '''
 	
 	check_sram_overflow(index_sram_chunk)
-	pipe_2_3_time = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet)
+	pipe_2_3_time, output_CBUF_chunk = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet)
 	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)
 	copy_time = time_SRAM_DRAM()
 	
@@ -712,25 +717,28 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	total_time_SRAM_chunk = time_subsequent_chunks + time_first_chunk
 	logging.info("Total time to transfer : {}".format(total_time_SRAM_chunk))
 	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.")
-	return total_time_SRAM_chunk
+	return total_time_SRAM_chunk, output_CBUF_chunk
 
 '''Operation'''
 def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	'''calculate the total time to finish one layer'''
 	# add exception handling here later
+	global previous_output_in_SRAM
 	total_time_layer = 0
 	total_chunks_from_DRAM_SRAM = length_SRAM_CHUNKS_FROM_DRAM(index_input)
 	total_chunks_from_SRAM_CBUF_per_SRAM_chunk = length_CBUF_CHUNKS_FROM_SRAM()
 	
 	print("---IN total_time_per_layer()---")
 	for i in range(total_chunks_from_DRAM_SRAM):
-		print(i)
 		logging.info("Computing time for SRAM chunk {}".format(i))
 		total_time_layer += time_DRAM_SRAM(direction, index_input,i) 
-		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer
-		
+		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer	
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
-			total_time_layer += total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
+			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
+			total_time_layer += time
+			previous_output_in_SRAM += data
+	
+	print(previous_output_in_SRAM)
 	logging.info("Total time to transfer (---IN total_time_per_layer()---): {}".format(total_time_layer))
 	logging.info("At this point first chunk of data stored in CBUF_CHUNKS_FROM_SRAM has been computed and the time to do so has been calculated.")
 	return total_time_layer
@@ -745,6 +753,8 @@ def total_layers_in_network():
 	return counter
 
 Clock_freq = 2700000000   # 2.7 GHz
+total_inference_time = 0  # total image inference time
+
 '''Operation'''
 def total_inference_time():
 	'''calculate the total inference time 
@@ -780,8 +790,7 @@ def total_inference_time():
 			time_inference += layer_time
 			logging.info("Completed Layer..")
 		SRAM_CHUNKS_FROM_DRAM = []    # reinitialize after finishing a layer
-		CBUF_CHUNKS_FROM_SRAM = [[]]  # ---------------"--------------------
-
+		CBUF_CHUNKS_FROM_SRAM = [[]]  # ---------------"--------------------	  # ---------------"--------------------
 	time_softmax = softmax()   		# assuming cpu clock freq = 3.2Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
 	time_upsampling = upsampling()  # ------------------------------------------"""------------------------------------------
 	time_sec = round(time_inference/Clock_freq, 3)
@@ -795,7 +804,7 @@ def update_sram(index_sram_chunk):
 	''' update the max size of data stored in sram'''
 	global SRAM_size_in_bits , SRAM_CHUNKS_FROM_DRAM, data_size_Delivery_Group
 	input_percentage = (SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]/SRAM_size_in_bits)*100
-	output_percentage = (data_size_Delivery_Group/SRAM_size_in_bits)*100
+	output_percentage = (previous_output_in_SRAM/SRAM_size_in_bits)*100
 	remaining_percentage = 100 - input_percentage - output_percentage
 	return input_percentage, output_percentage, remaining_percentage
 
@@ -805,11 +814,15 @@ def check_sram_overflow(index_sram_chunk):
 		Reports overflow and exits if such an event occurs 
 		Otherwise returns filled space and percentage of filled space per data type (input, weight, output) 
 		Further we could provide chunk specific and associated input, weight, output values '''
+	global SRAM_size_in_bits
 	inp , out, remaining = update_sram(index_sram_chunk)
-	if(inp + out >= 100):
+	inp_size = (inp*SRAM_size_in_bits)/100
+	out_size = (out*SRAM_size_in_bits)/100
+	if(inp + out > 100):
+		print(inp_size, " ", out_size)
 		logging.info("Overflowing SRAM... Exiting for now...")
 		sys.exit(0)
-	logging.info("Space occupied in SRAM : {0}% by Input Data (feature + weight) and {1}% by Output from SDP. Remaining {2}%".format(inp,out,remaining))
+	logging.info("Space occupied in SRAM : {0}% by Input Data (feature + weight) and {1}% by Output from SDP. Empty space {2}%".format(inp,out,remaining))
 
 ''' check stack trace of function calls 
 	
@@ -842,11 +855,24 @@ def numerical_simulator():
 	   We can use the Perceptron model to find the right parameters for SRAM, CBUF,MAC. 
 
 	'''
-	# Brute force 
-	# sram_options = [8,10,12,14,16]
-	# size_atomic_op_options = [8704, 16896, 25088, 33280, 41472]
-	# chunk_size_DRAM_SRAM = []
+	# Check all combinations
+	global SRAM_size_in_bits, size_atomic_op, total_inference_time
+	sram_options = [8,10,12,14,16]*(1024*1024)
+	atomic_op_options = [8704, 16896, 25088, 33280, 41472]
+	inference_time_array = {}
+	#total possible combimations for the two lists = 5C1*5C1
+	total_combinations = 25
+	for i in range(len(sram_options)):
+		for j in range(len(size_atomic_op)):
+			SRAM_size_in_bits = sram_options[i]
+			size_atomic_op = atomic_op_options[j]
+			total_inference_time()
+			inference_time_array.update({total_inference_time : list(SRAM_size_in_bits,size_atomic_op) })
 
+	
+	logging.info("Inference time Array: {}".format(inference_time_array))
+
+	
 
 def main():
 	'''call the total_inference_time() function to initiate the inference process '''
