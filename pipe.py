@@ -121,7 +121,7 @@ logging.basicConfig(filename="./pipe.log",
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (1,2,3,4,5,6,7,8,9,1,2,3,4,5,6,7,8,9,1,2,3,4,5,6)  # dummy values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (2.5,2.6,1500000000,1.4,1.4,100000000,0,0,512,4,0,7,7,0,0,1,1,1,0,544,1,1,0,512)  # dummy values used now for debugging
 
 ''' Important Note - input-size.txt = 100 lines
 					 weight-size.txt = 75 lines '''
@@ -194,7 +194,7 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 	'''
 	print("///IN time_DRAM_SRAM()////")
 	dummy_time = 0 # garbage time (throw away later)
-	global GDDR6_reading_time, weights, feature, SRAM_writing_time, delay_bdma
+	global GDDR6_reading_time, weights, feature, SRAM_writing_time, delay_bdma, SRAM_CHUNKS_FROM_DRAM,GDDR6_clock_freq,SRAM_clock_freq
 	stages = {'dram':'active', 'sram':'active', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
 	logger.info("Active and Idle stages : {}".format(stages))
 	
@@ -210,7 +210,7 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 			''' At the end of this all data for convolution is going to present in SRAM, now DRAM is idle'''
 
 			logger.info("SRAM can fit all data... Proceeding...")
-			total_chunks_to_read = total_data_to_transfer//chunks_read_size + total_data_to_transfer%chunks_read_size
+			total_chunks_to_read = math.ceil(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]/chunks_read_size)
 			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time  # time taken to transfer just the first chunk of 512 bits 
 
 			# for the remaining chunks
@@ -231,14 +231,13 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 				Note that the core logic for calculating time would remain the same '''
 			logger.info("SRAM cannot fit all data at once... Proceeding with smaller chunks...")
 			total_chunks_to_read = int(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]//chunks_read_size) + int(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]%chunks_read_size)
-			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time  # time taken to transfer just the first chunk of 512 bits 
+			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time # time taken to transfer just the first chunk of 512 bits 
 
 			# for the remaining chunks
 			for chunk in range(total_chunks_to_read-1):
 				# for the remaining chunks, since Pipe 1 is established now, the time taken now would be only as fast as the slowest component i.e. GDDR6 read time
 				# We could have multiplied, but for loop gives a better feel for transfer I think!
 				total_transfer_time += GDDR6_reading_time
-
 			# Now the total time taken can simply be added for first set of data to transfer into SRAM 
 			total_transfer_time = total_transfer_time + transfer_time_first_chunk
 			logging.info("Total time to transfer : {}".format(total_transfer_time))
@@ -254,8 +253,10 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 '''Non-Operaton'''
 def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 	''' return length of SRAM_CHUNKS_FROM_DRAM for every new layer '''
-
-	total_data_to_transfer = feature[index_input] + weights[index_input]
+	if(index_input == 0):
+		total_data_to_transfer = feature[index_input] + weights[index_input]
+	else:
+		total_data_to_transfer =  weights[index_input]
 	total_chunks = generate_chunks_for_sram(total_data_to_transfer)
 	make_chunks_SRAM_CBUF()
 	#print("CBUF_CHUNKS_FROM_SRAM: {}".format(CBUF_CHUNKS_FROM_SRAM))
@@ -273,12 +274,14 @@ def generate_chunks_for_sram(size):
 	print("----------", remaining_SRAM_space, " ", previous_output_in_SRAM)
 	if(remaining_SRAM_space <= SRAM_size_in_bits and remaining_SRAM_space >0): 
 		
-		if(size < remaining_SRAM_space):
-			total_chunks = 1
-			chunk_size = size
-		else:
-			total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
-			chunk_size = chunk_size_DRAM_SRAM #remaining_SRAM_space
+		# if(size < remaining_SRAM_space):
+		# 	total_chunks = 1
+		# 	chunk_size = size
+		# else:
+		# 	total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
+		# 	chunk_size = chunk_size_DRAM_SRAM #remaining_SRAM_space
+		total_chunks = math.ceil(size/chunk_size_DRAM_SRAM)
+		chunk_size = chunk_size_DRAM_SRAM #remaining_SRAM_space
 		for i in range(total_chunks):
 			SRAM_CHUNKS_FROM_DRAM.append(chunk_size)
 		
@@ -318,7 +321,7 @@ def can_sram_fit(total_size):
 CBUF_CHUNKS_FROM_SRAM = []  # stores the values for each chunk that will be transferred from SRAM --> CBUF 
 							  # the index of CBUF_CHUNKS_FROM_SRAM would give us the SRAM_CHUNK that we are currently looking at 
 CBUF_SIZE = 524288*8 # size of CBUF in bits 
-CBUF_CHUNK_SIZE = int(CBUF_SIZE)
+CBUF_CHUNK_SIZE = int(CBUF_SIZE/16)
 ''' Important Note - Everytime we process a layer the values in arrays CBUF_CHUNKS_FROM_SRAM and SRAM_CHUNKS_FROM_DRAM need to be updated again. i.e. the arrays must be 
 	emptied and refilled for the new layer. However while working on one layer, no need to change'''
 
@@ -633,6 +636,7 @@ def time_SRAM_DRAM():
 	
 	return total_transfer_time
 
+Clock_freq = 2700000000   # 2.7 GHz
 
 ''' Now various chunks of data would be computed in parallel as the pipeline builds up '''
 
@@ -699,12 +703,14 @@ def MAX(t1, t2 , l):
 def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram_chunk,index_cbuf_chunk):
 	''' calculate the total time taken to complete a chunk present in SRAM '''
 	
+	global SRAM_clock_freq, Clock_freq
 	check_sram_overflow(index_sram_chunk)
 	pipe_2_3_time, output_CBUF_chunk = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet)
-	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)
-	copy_time = time_SRAM_DRAM()
+	pipe_2_3_time = pipe_2_3_time//Clock_freq
+	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)//Clock_freq
+	copy_time = time_SRAM_DRAM()//SRAM_clock_freq
 	
-	time_first_chunk = time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk)   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
+	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))//Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
 	time_subsequent_chunks =  pipe_2_3_time + pipe_1_4_time + copy_time
 	total_time_SRAM_chunk = 0  # time taken to empty the chunk that was stored in SRAM from DRAM, these chunks are mentioned in SRAM_CHUNKS_FROM_DRAM array
 	'''first we compute the time to finish the chunk stored in SRAM '''
@@ -723,7 +729,7 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	'''calculate the total time to finish one layer'''
 	# add exception handling here later
-	global previous_output_in_SRAM, weights , feature
+	global previous_output_in_SRAM, weights , feature, GDDR6_clock_freq
 	total_time_layer = 0
 	total_chunks_from_DRAM_SRAM = length_SRAM_CHUNKS_FROM_DRAM(index_input)
 	total_chunks_from_SRAM_CBUF_per_SRAM_chunk = length_CBUF_CHUNKS_FROM_SRAM()
@@ -731,7 +737,7 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	print("---IN total_time_per_layer()---")
 	for i in range(total_chunks_from_DRAM_SRAM):
 		logging.info("Computing time for SRAM chunk {}".format(i))
-		total_time_layer += time_DRAM_SRAM(direction, index_input,i) 
+		total_time_layer += time_DRAM_SRAM(direction, index_input,i)//GDDR6_clock_freq
 		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer	
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
 			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
@@ -752,7 +758,7 @@ def total_layers_in_network():
 			counter += 1
 	return counter
 
-Clock_freq = 2700000000   # 2.7 GHz
+
 total_inference_time = 0  # total image inference time
 
 '''Operation'''
@@ -792,10 +798,9 @@ def total_inference_time():
 		CBUF_CHUNKS_FROM_SRAM = []  	# ---------------"--------------------	  # ---------------"--------------------
 	time_softmax = softmax()   			# assuming cpu clock freq = 2.7Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
 	time_upsampling = upsampling()  	# ------------------------------------------"""------------------------------------------
-	time_sec = round(time_inference/Clock_freq, 3)
-	total_inference_time = time_sec + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
-	logging.info("TOTAL INFERENCE TIME (in Cycles): {}".format(time_inference))
-	logging.info("Time : {}".format(time_sec))
+	total_inference_time = time_inference + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
+	#logging.info("TOTAL INFERENCE TIME (in Cycles): {}".format(time_inference))
+	#logging.info("Time : {}".format(time_sec))
 	logging.info("UPSAMPLING TIME: {0}	SOFTMAX: {1}".format(time_upsampling, time_softmax))
 	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
