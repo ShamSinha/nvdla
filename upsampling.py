@@ -1,7 +1,8 @@
 import torch
 import numpy as np
-import time, timeit
-
+import timeit
+import matplotlib.pyplot as plt
+import statistics
 '''
 two upsample layers
 1. 85 layer
@@ -20,7 +21,7 @@ def upsampling():
 	#print(input_1.size())
 	input_2=torch.rand(1, 128, 26, 26)
 
-	t1=time.time()    #start the time
+	t1=timeit.timeit()    #start the time
 	#the first upsample layer
 	model=torch.nn.Upsample((26, 26), mode='bilinear', align_corners=True)
 	model(input_1)
@@ -30,11 +31,35 @@ def upsampling():
 	model=torch.nn.Upsample((52, 52), mode='bilinear', align_corners=True)
 	model(input_2)
 
-	t2=time.time()    #stop the time
+	t2=timeit.timeit()    #stop the time
 	T=t2-t1
 	return T         #print the total time
 
 if __name__ == '__main__':
+	time_array = []
+	j =0
+	for i in range(10000):
+		if(i%500 == 0):
+			j += 1
+			print("Computing " + "."*(j))
+		time = upsampling()
+		time_array.append(time)
+
+	for val in time_array:
+		if val < 0:
+			time_array.remove(val)
+			val = -1*val
+			time_array.append(val)
 	
-	time = upsampling()
-	print(time)
+	count = 0
+
+	for val in time_array:
+		if val<0:
+			count += 1
+
+	print(count)
+	print("Median time: ", statistics.median(time_array))
+	plt.plot(time_array)
+	plt.xlabel("Iteration Number")
+	plt.ylabel("Time")
+	plt.show()

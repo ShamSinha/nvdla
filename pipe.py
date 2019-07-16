@@ -121,7 +121,7 @@ logging.basicConfig(filename="./pipe.log",
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (2.5,2.6,1500000000,1.4,1.4,100000000,0,0,512,4,0,7,7,0,0,1,1,1,0,544,1,1,0,512)  # dummy values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,1.4,1.4,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # dummy values used now for debugging
 
 ''' Important Note - input-size.txt = 100 lines
 					 weight-size.txt = 75 lines '''
@@ -169,7 +169,7 @@ GDDR6_writing_time = t0_GDDR6_512bits  # time taken to write 512 bits of data to
 GDDR6_reading_time = t1_GDDR6_512bits  # time taken to read 512 bits of data from GDDR6
 GDDR6_clock_freq = gddr6_clk
 
-SRAM_size = size_SRAM() + 2 #MB  where did the 2 come from we need to figure this out
+SRAM_size = size_SRAM()  #MB  where did the 2 come from we need to figure this out
 SRAM_size_in_bits = SRAM_size*1024*1024*8 # sram size in bits 
 chunk_size_DRAM_SRAM = 0.5*1024*1024*8      # = SRAM_size_in_bits - previous_output_in_SRAM or total_data_to_transfer (<SRAM_size_in_bits)
 SRAM_writing_time = t0_SRAM_512bits    # time taken to write 512 bits of data to SRAM
@@ -396,7 +396,7 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 	logging.info("SRAM --> CBUF")
 	
 	for chunk in range(total_chunks_to_read-1): # for the remainder of chunks we just add the time taken to read from SRAM
-		total_transfer_time += SRAM_reading_time
+		total_transfer_time += SRAM_writing_time
 
 	total_transfer_time = total_transfer_time + first_transfer_time
 	logging.info("Total time to transfer : {}".format(total_transfer_time))
@@ -418,7 +418,7 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 
 '''
 
-size_atomic_op = 33280 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision.
+size_atomic_op = 16896 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision.
 delay_csc = t0_CSC
 delay_cmac = t0_CMAC
 delay_adder_array = t0_CACC_Adder
@@ -706,9 +706,9 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	global SRAM_clock_freq, Clock_freq
 	check_sram_overflow(index_sram_chunk)
 	pipe_2_3_time, output_CBUF_chunk = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet)
-	pipe_2_3_time = pipe_2_3_time//Clock_freq
-	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)//Clock_freq
-	copy_time = time_SRAM_DRAM()//SRAM_clock_freq
+	pipe_2_3_time = pipe_2_3_time/Clock_freq
+	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)/Clock_freq
+	copy_time = time_SRAM_DRAM()/SRAM_clock_freq
 	
 	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))//Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
 	time_subsequent_chunks =  pipe_2_3_time + pipe_1_4_time + copy_time
@@ -737,7 +737,7 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	print("---IN total_time_per_layer()---")
 	for i in range(total_chunks_from_DRAM_SRAM):
 		logging.info("Computing time for SRAM chunk {}".format(i))
-		total_time_layer += time_DRAM_SRAM(direction, index_input,i)//GDDR6_clock_freq
+		total_time_layer += time_DRAM_SRAM(direction, index_input,i)/GDDR6_clock_freq
 		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer	
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
 			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
@@ -799,7 +799,7 @@ def total_inference_time():
 	time_softmax = softmax()   			# assuming cpu clock freq = 2.7Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
 	time_upsampling = upsampling()  	# ------------------------------------------"""------------------------------------------
 	total_inference_time = time_inference + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
-	#logging.info("TOTAL INFERENCE TIME (in Cycles): {}".format(time_inference))
+	logging.info("TOTAL INFERENCE TIME (in sec): {}".format(time_inference))
 	#logging.info("Time : {}".format(time_sec))
 	logging.info("UPSAMPLING TIME: {0}	SOFTMAX: {1}".format(time_upsampling, time_softmax))
 	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
