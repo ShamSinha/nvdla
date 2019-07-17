@@ -123,9 +123,9 @@ logging.basicConfig(filename="./pipe.log",
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,1.4,1.4,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # dummy values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,2,2,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # correct values used now for debugging
 
-''' Important Note - input-size.txt = 100 lines
+''' Important Note - input-size.txt =  75 lines
 					 weight-size.txt = 75 lines '''
 
 '''Non-Operation'''

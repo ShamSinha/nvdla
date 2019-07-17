@@ -109,7 +109,7 @@ import logging
 import traceback
 import timeit
 
-from upsampling import upsampling
+
 from softmax import softmax
 # lists holding the various sizes in bits
 weights = []
@@ -123,10 +123,10 @@ logging.basicConfig(filename="./pipe-2.log",
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,1.4,1.4,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # dummy values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,2,2,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # correct values used now for debugging
 
-''' Important Note - input-size.txt = 100 lines
-					 weight-size.txt = 75 lines '''
+''' Important Note - input-size.txt =  22  lines 
+					 weight-size.txt = 22  lines '''
 
 '''Non-Operation'''
 def size_SRAM():
@@ -140,10 +140,10 @@ def size_SRAM():
  	global feature
  	global total
  	t = 0
- 	with open('weight-size.txt', 'r') as f:
+ 	with open('weight-size-rcnn.txt', 'r') as f:
  		for line in f:
  			weights.append(int(line))
- 	with open('input-size.txt', 'r') as f:
+ 	with open('input-size-rcnn.txt', 'r') as f:
  		for line in f:
  			feature.append(int(line))
  	for i in range(len(weights)):
@@ -420,7 +420,7 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 
 '''
 
-size_atomic_op = 16896 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision.
+size_atomic_op = 16896 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64xKv while considering int8 precision.
 delay_csc = t0_CSC
 delay_cmac = t0_CMAC
 delay_adder_array = t0_CACC_Adder
@@ -751,20 +751,33 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	logging.info("At this point layer: {} has been computed and the time to do so has been calculated.".format(index_input))
 	return total_time_layer
 
-'''Non-Operation'''
-def total_layers_in_network():
-	''' calculate total convolution layers in the network '''
-	counter = 0
-	with open('weight-size.txt','r') as f:
-		for line in f:
-			counter += 1
-	return counter
+def time_SRAM_PDP(index_input):
+	''' calculate time to compute Max pooling layers'''
+	print("IN time_SRAM_PDP....")
+
+def time_SRAM_RUBIK(index_input):
+	''' calculate time for Reshaping'''
+	print("IN time_SRAM_RUBIK...")
+
+def time_FC(index_input):
+	print("IN time_FC...")
+
+def time_PROPOSAL():  # does it require index_input ??
+	print("IN time_PROPOSAL...")
+# '''Non-Operation'''
+# def total_layers_in_network():
+# 	''' calculate total convolution layers in the network '''
+# 	counter = 0
+# 	with open('weight-size-rcnn.txt','r') as f:
+# 		for line in f:
+# 			counter += 1
+# 	return counter
 
 
 total_inference_time = 0  # total image inference time
-
+# ====================================  Faster-R-CNN ====================================
 '''Operation'''
-def total_inference_time():
+def total_inference_time_rcnn():
 	'''calculate the total inference time 
 	   total number of convolution operations 
 	   total number of max pooling layers 
@@ -777,7 +790,7 @@ def total_inference_time():
 	   							6) Bounding_box  1 time  CPU
 	   							7) Class score   1 time  CPU
 	   							8) Class probabilty  1 time  CPU
-	   							9) Convolution 	 1 No RELU  NVDLA
+	   							9) Convolution 	 2 No RELU  NVDLA  (use same time as Convolution with RELU (because no arbitration between CACC and SRAM))
 	   	How will this work? 
 	   		First set of layers include the usual Convolution with RELU operations + Max Pooling in between
 	   		Max pooling:
@@ -787,51 +800,126 @@ def total_inference_time():
 			Nested subroutines will do rest of the computation after Convolution 5_3 has been calculated, until the 
 			first FC layer. 
 	'''
-	pass 
-
-'''Operation'''
-def total_inference_time():
-	'''calculate the total inference time 
-	   total number of convolution layers in the Network
-	   Resnet configured every 2 layers , not the case in YOLOv3(fix this later)'''
-	global SRAM_CHUNKS_FROM_DRAM,CBUF_CHUNKS_FROM_SRAM,Clock_freq, previous_output_in_SRAM
-
-	layers = total_layers_in_network()
-	logging.info("Number of layers in Network {}".format(layers))
-	time_inference = 0
-	resnet_flag = 0
-	cached_for_resnet = 0
-	logging.info("Calculating time for complete inference of image input")
-	for layer in range(layers):
-		if (layer%2 == 0 and layer > 4 and layer < 51):
-			resent_flag = 1
-			cached_for_resnet = feature[layer-2]
-			logging.info("LAYER NUMBER : {}".format(layer + 1))
-			logging.info("Layer size: {}".format(weights[layer]+ feature[layer]))
-			
-			logging.info("Resnet flag: {0} , Cached output: {1}".format(resent_flag, cached_for_resnet))
-			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  
-			time_inference += layer_time
-			logging.info("Completed Layer..")
+	total_inference_time = 0
+	for i in range(1,23):
+		if (i%3 == 0 and i<=6):
+			logging.info("MAx pooling... " + "Layer: {}".format(i))
+			total_inference_time += time_SRAM_PDP(i)   # add the time for Max pooling
+		elif (i == 10 or i == 14):
+			logging.info("MAx pooling..." + "Layer: {}".format(i))
+			total_inference_time += time_SRAM_PDP(i)   # add the time for Max pooling
+		elif (i == 18):
+			logging.info("Subrountine beginning...")
+			logging.info("Convolution operation... No RELU. Output of this convolution should feed the two subrountine defined below" + "Layer: {}".format(i))
+			resp_time_1 = subroutine_1(i)
+			total_inference_time += resp_time_1
+			print(resp_1)
+			resp_time_2 = subroutine_2(i)
+			total_inference_time += resp_time_2
+			print(resp_2)
+			logging.info("Performing Proposal layer...")
+			proposal_time = time_PROPOSAL()
+			total_inference_time += proposal_time
+		elif (i == 19):
+			logging.info("Using output of Subrountine_1 and Subrountine_2 to compute ROI_POOLING...")
+			total_inference_time += time_SRAM_PDP(i)
+		elif (i == 20 or i == 21):
+			logging.info("Performing Fully connected operation..." + "Layer: {}".format(i))
+			total_inference_time += time_FC(i)
+		elif(i == 22):
+			logging.info("Subroutine_3 beginnging... ")
+			resp_3 = subroutine_3('conv')
+			print(resp_3)
+			logging.info("Computing Bbox_predictions...")
+			logging.info("--------Completed Faster RCNN-----------")
+			# chen's code here
 		else:
-			resnet_flag = 0
-			logging.info("LAYER NUMBER : {}".format(layer))
-			logging.info("Resnet flag: {0}".format(resnet_flag))
-			logging.info("Layer size: {}".format(weights[layer]+ feature[layer]))
-			
-			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)   
-			time_inference += layer_time
-			logging.info("Completed Layer..")
-		SRAM_CHUNKS_FROM_DRAM = []      # reinitialize after finishing a layer
-		CBUF_CHUNKS_FROM_SRAM = []  	# ---------------"--------------------	  # ---------------"--------------------
-	time_softmax = softmax()   			# assuming cpu clock freq = 2.7Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
-	time_upsampling = upsampling()  	# ------------------------------------------"""------------------------------------------
-	total_inference_time = time_inference + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
-	logging.info("TOTAL INFERENCE TIME (in sec): {}".format(time_inference))
-	#logging.info("Time : {}".format(time_sec))
-	logging.info("UPSAMPLING TIME: {0}	SOFTMAX: {1}".format(time_upsampling, time_softmax))
+			logging.info("convolution operation with RELU..." + "Layer: {}".format(i))
+			total_inference_time += total_time_per_layer('right', 0, i, 0)
+	
 	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
+########### Subroutines for Faster-R-CNN ###############
+'''Operation'''
+def subroutine_1(index_input):
+	''' take the convolution input, perform the subrountine '''
+	subroutine_time = 0
+	for i in range(4):
+		if(i%2 != 0):
+			logging.info("Reshaping...")
+			subroutine_time += time_SRAM_RUBIK(i)
+		elif(i == 0):
+			logging.info("Convolution operation... No RELU" + "Layer: {}".format(i))
+			subroutine_time += total_time_per_layer('right', 0, index_input, 0)
+		else:
+			logging.info("Performing softmax operation... ")
+			time_softmax = softmax()
+			subroutine_time += time_softmax
+	return (subroutine_time)
+
+'''Operation'''
+def subroutine_2(index_input):
+	''' take the convolution input, perform the subrountine '''
+	subroutine_time = 0
+	logging.info("Performing Convolution operation.. No RELU")
+	subroutine_time += total_time_per_layer('right', 0, index_input, 0)
+	return (subroutine_time)
+
+'''Operation'''
+def subroutine_3():
+	''' take input of previous layer and compute the class probabilites and scores '''
+	subroutine_time = 0
+	logging.info("Computing class scores...")
+	# chen's code here
+	logging.info("Computing class probabilites...")
+	return (subroutine_time)
+
+########################################################
+#=========================================================================================
+
+# '''Operation'''
+# def total_inference_time():
+# 	'''calculate the total inference time 
+# 	   total number of convolution layers in the Network
+# 	   Resnet configured every 2 layers , not the case in YOLOv3(fix this later)'''
+# 	global SRAM_CHUNKS_FROM_DRAM,CBUF_CHUNKS_FROM_SRAM,Clock_freq, previous_output_in_SRAM
+
+# 	layers = total_layers_in_network()
+# 	logging.info("Number of layers in Network {}".format(layers))
+# 	time_inference = 0
+# 	resnet_flag = 0
+# 	cached_for_resnet = 0
+# 	logging.info("Calculating time for complete inference of image input")
+# 	for layer in range(layers):
+# 		if (layer%2 == 0 and layer > 4 and layer < 51):
+# 			resent_flag = 1
+# 			cached_for_resnet = feature[layer-2]
+# 			logging.info("LAYER NUMBER : {}".format(layer + 1))
+# 			logging.info("Layer size: {}".format(weights[layer]+ feature[layer]))
+			
+# 			logging.info("Resnet flag: {0} , Cached output: {1}".format(resent_flag, cached_for_resnet))
+# 			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)  
+# 			time_inference += layer_time
+# 			logging.info("Completed Layer..")
+# 		else:
+# 			resnet_flag = 0
+# 			logging.info("LAYER NUMBER : {}".format(layer))
+# 			logging.info("Resnet flag: {0}".format(resnet_flag))
+# 			logging.info("Layer size: {}".format(weights[layer]+ feature[layer]))
+			
+# 			layer_time = total_time_per_layer('right',resnet_flag,layer,cached_for_resnet)   
+# 			time_inference += layer_time
+# 			logging.info("Completed Layer..")
+# 		SRAM_CHUNKS_FROM_DRAM = []      # reinitialize after finishing a layer
+# 		CBUF_CHUNKS_FROM_SRAM = []  	# ---------------"--------------------	  # ---------------"--------------------
+# 	time_softmax = softmax()   			# assuming cpu clock freq = 2.7Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
+# 	time_upsampling = upsampling()  	# ------------------------------------------"""------------------------------------------
+# 	total_inference_time = time_inference + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
+# 	logging.info("TOTAL INFERENCE TIME (in sec): {}".format(time_inference))
+# 	#logging.info("Time : {}".format(time_sec))
+# 	logging.info("UPSAMPLING TIME: {0}	SOFTMAX: {1}".format(time_upsampling, time_softmax))
+# 	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
+# 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
 
 '''Non-Operation'''
 def update_sram(index_sram_chunk):
@@ -910,7 +998,7 @@ def optimizer():
 
 def main():
 	'''call the total_inference_time() function to initiate the inference process '''
-	total_inference_time()
+	total_inference_time_rcnn()
 	#optimizer()
 
 if __name__ == "__main__":
