@@ -12,6 +12,8 @@
 # __email__ = “nvdlagroup@gmail.com”
 # __status__ = “Dev”
 
+''' YOLOv3 INFERENCE CALCULATION'''
+
 ''' Given time taken to in each module of NVDLA along with the time between modules we can calculate the total time taken
 	to compute a layer in a neural network 
 
