@@ -13,6 +13,7 @@
 # __status__ = “Dev”
 
 ''' FASTER RCNN INFERENCE CALCULATION'''
+
 ''' Given time taken to in each module of NVDLA along with the time between modules we can calculate the total time taken
 	to compute a layer in a neural network 
 
@@ -761,6 +762,32 @@ def total_layers_in_network():
 
 
 total_inference_time = 0  # total image inference time
+
+'''Operation'''
+def total_inference_time():
+	'''calculate the total inference time 
+	   total number of convolution operations 
+	   total number of max pooling layers 
+	   Other operations include : 
+	   							1) Reshape	2 times   RUBIK
+	   							2) SOFTMAX  1 time    CPU
+	   							3) Proposal 1 time 	  DONT KNOW
+	   							4) ROI Pooling   1 times DONT KNOW 
+	   							5) FC layers  2 times    NVDLA
+	   							6) Bounding_box  1 time  CPU
+	   							7) Class score   1 time  CPU
+	   							8) Class probabilty  1 time  CPU
+	   							9) Convolution 	 1 No RELU  NVDLA
+	   	How will this work? 
+	   		First set of layers include the usual Convolution with RELU operations + Max Pooling in between
+	   		Max pooling:
+	   					4 times : 3rd, 6th, 10th, 14th
+	   					means we meed to pass the data of the previous layer to pdp instead of sdp (repeat the same procedure for sdp here but with pdp parameters)
+			Convolution: 13 with RELU: 1_1, 1_2; 2_1, 2_2; 3_1, 3_2, 3_3; 4_1, 4_2, 4_3; 5_1, 5_2, 5_3
+			Nested subroutines will do rest of the computation after Convolution 5_3 has been calculated, until the 
+			first FC layer. 
+	'''
+	pass 
 
 '''Operation'''
 def total_inference_time():
