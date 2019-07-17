@@ -3,9 +3,9 @@
 
 # Ownership
 # Improve this section later
-# __author__ = ""
+# __author__ = "Aditya Prasad"
 # __copyright__ = “Copyright 2019, AI ACCELERATOR PROJECT”
-# __credits__ = []
+# __credits__ = ["Shubham Kumar", "Kundan Doiphode", "Chen Haoji", "Moonki", "Yangyi", "Dhyeo"]
 # __license__ = “Decide Later”
 # __version__ = “0.1.0”
 # __maintainer__ = “Digital Systems Lab, Hanyang University”
@@ -109,8 +109,6 @@ import logging
 import traceback
 import timeit
 
-
-from softmax import softmax
 # lists holding the various sizes in bits
 weights = []
 feature = []
@@ -123,7 +121,7 @@ logging.basicConfig(filename="./pipe-2.log",
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
-t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,2,2,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # correct values used now for debugging
+t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,2,2,2700000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # correct values used now for debugging
 
 ''' Important Note - input-size.txt =  22  lines 
 					 weight-size.txt = 22  lines '''
@@ -153,7 +151,7 @@ def size_SRAM():
  	denominator = 1024*1024*8 	# to get answer in MB
  	max_sum = max_sum/denominator
  
- 	return (math.ceil(round(max_sum,3)))  # for the moment we take SRAM as 8 MB by adding 2.7 MB of additional storage space in on-chip SRAM
+ 	return (math.ceil(round(max_sum,3)))  
 
 # check that input and weight arrays are equal in length. This is not working properly 
 if(len(weights) == len(feature)):
@@ -431,7 +429,7 @@ Delivery_reading_time = t0_Delivery
 Delivery_writing_time = t1_Delivery
 
 '''Operation'''
-def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk):
+def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk,flag_fc):
 	''' calculate the time taken to transfer data from CBUF to Assembly group 
 		Note : CBUF  		  ------ active 
 		   	   CSC  		  ------ active
@@ -449,37 +447,53 @@ def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk):
 
 	chunk_in_cbuf = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]
 	total_atomic_reads_from_cbuf = math.ceil(chunk_in_cbuf/size_atomic_op)
-	
+	total_reads_from_cbuf_for_one_atomic_op = math.ceil(size_atomic_op/CBUF_writing_bandwidth) # total reads from CBUF for one atomic operation data.
 	# Since the bandwidth of CBUF is limited to CBUF_writing_bandwidth = 256*8, and the required size for computation is per atomic_operations is size_atomic_op
 	# to send this data to CMAC would require multiple reads from CBUF 
 	# Therefore
-	total_reads_from_cbuf_for_one_atomic_op = math.ceil(size_atomic_op/CBUF_writing_bandwidth) # total reads from CBUF for one atomic operation data.
-	time_to_read_first_atomic_chunk_into_CMAC = CBUF_Writing_time + delay_csc + delay_cmac + delay_adder_array  # this is the first chunk of atomic data that can be read from CBUF due to its limited bandwidth
+	total_transfer_time = 0 
 	time_to_read_one_atomic_op = 0
-	logging.info("CBUF --> CSC --> CMAC --> Assembly_Group")
+	if(flag_fc == 'conv'):
+		logging.info("Performing Convolution layer Computation...")
+		logging.info("CBUF --> CSC --> CMAC --> Assembly_Group")
 
-	for i in range(total_reads_from_cbuf_for_one_atomic_op -1):
-		'''for the remaing chunks for this atomic operation, since the pipeline is setup we can simply add the time to read from CBUF '''
-		time_to_read_one_atomic_op += CBUF_Writing_time     # time taken to read one atomic operation equivalent of data into CMAC
-	
-	time_to_read_one_atomic_op = time_to_read_one_atomic_op + time_to_read_first_atomic_chunk_into_CMAC
+		time_to_read_first_atomic_chunk_into_CMAC = CBUF_Writing_time + delay_csc + delay_cmac + delay_adder_array  # this is the first chunk of atomic data that can be read from CBUF due to its limited bandwidth
+		
+		for i in range(total_reads_from_cbuf_for_one_atomic_op -1):
+			'''for the remaing chunks for this atomic operation, since the pipeline is setup we can simply add the time to read from CBUF '''
+			time_to_read_one_atomic_op += CBUF_Writing_time     # time taken to read one atomic operation equivalent of data into CMAC
+		
+		time_to_read_one_atomic_op = time_to_read_one_atomic_op + time_to_read_first_atomic_chunk_into_CMAC
 
-	''' At the end of this one set of atomic operations would be complete and result (partial sum) would be stored back in Assembly Group
+		''' At the end of this one set of atomic operations would be complete and result (partial sum) would be stored back in Assembly Group
 		Now we must continue this process to empty the CBUF and store all the results in CACC_Assembly_Group 
 		As the pipeline Pipe 2 is already setup after first atomic operation we can find the time taken by adding the total number of atomic operations that need to be computed
 		For each atomic operation we will add the  time_to_read_one_atomic_op time to the total time '''
 
-	total_transfer_time = 0 
+		for i in range(total_atomic_reads_from_cbuf-1):
+			'''since we have already computed the first atomic read'''
+			total_transfer_time += time_to_read_one_atomic_op
 
-	for i in range(total_atomic_reads_from_cbuf-1):
-		'''since we have already computed the first atomic read'''
-		total_transfer_time += time_to_read_one_atomic_op
+		total_transfer_time = total_transfer_time + time_to_read_one_atomic_op
+
+	elif(flag_fc == 'fc'):
+		logging.info("Performing FC layer Computation...")
+		logging.info("CBUF --> CSC --> CMAC --> Assembly_Group")
+		for i in range(total_reads_from_cbuf_for_one_atomic_op):
+			'''for the remaing chunks for this atomic operation, since the pipeline is setup we can simply add the time to read from CBUF '''
+			time_to_read_one_atomic_op += CBUF_Writing_time + delay_csc + delay_cmac + delay_adder_array    # time taken to read one atomic operation equivalent of data into CMAC
+		
+		for i in range(total_atomic_reads_from_cbuf-1):
+			'''since we have already computed the first atomic read'''
+			total_transfer_time += time_to_read_one_atomic_op	
+	else:
+		logging.info("Operation not supported... Exiting now")
+		sys.exit(0)
 
 	logging.info("Total time to transfer : {}".format(total_transfer_time))
 	logging.info("At this point chunk number {} stored in CBUF_CHUNKS_FROM_SRAM has been computed and stored in Assembly_Group. This empties CBUF".format(index_cbuf_chunk))
 	
 	return total_transfer_time
-
 
 delay_truncation = t0_truncation
 size_partial_sum_generate_per_atomic_op = 544 # bits in case of int8
@@ -630,7 +644,7 @@ def time_SRAM_DRAM():
 	logger.info("SRAM -> DRAM")
 
 	for i in range(total_reads_from_SRAM -1):
-		total_transfer_time += SRAM_reading_time
+		total_transfer_time += GDDR6_writing_time
 
 	total_transfer_time = total_transfer_time + time_first_read_from_SRAM	
 	logging.info("Total time to transfer : {}".format(total_transfer_time))
@@ -643,7 +657,7 @@ Clock_freq = 2700000000   # 2.7 GHz
 ''' Now various chunks of data would be computed in parallel as the pipeline builds up '''
 
 '''Non-Operation'''
-def level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet):  # cbuf means following_chunk starting point and delivery means current_chunk following time 
+def level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet,flag_fc):  # cbuf means following_chunk starting point and delivery means current_chunk following time 
 	''' given that the first chunk of data has already started moving from Delivery Group back to SRAM we can begin the transfer the next chunk into CBUF
 		At this stage two operations are being performed 
 			1) reading from SRAM --> CBUF
@@ -664,7 +678,7 @@ def level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chu
 	'''
 	pipe_picked = ["Delivery to SRAM", "CBUF to Assembly"]
 	current_chunk_time, output_CBUF_chunk = time_Delivery_SRAM(resnet_flag,cached_for_resnet)
-	following_chunk_time = time_CBUF_Assembly(index_sram_chunk,index_cbuf_chunk)
+	following_chunk_time = time_CBUF_Assembly(index_sram_chunk,index_cbuf_chunk,flag_fc)
 	max_time, pipe = MAX(current_chunk_time, following_chunk_time, pipe_picked)
 	logging.info("Max time picked was: {0} which corresponds to {1}".format(max_time, pipe))
 	return max_time, output_CBUF_chunk
@@ -702,17 +716,17 @@ def MAX(t1, t2 , l):
 ''' A level higher: L1 level''' 
 
 '''Operation'''
-def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram_chunk,index_cbuf_chunk):
+def total_time_per_SRAM_chunk(direction,resnet_flag,flag_fc,cached_for_resnet,index_sram_chunk,index_cbuf_chunk):
 	''' calculate the total time taken to complete a chunk present in SRAM '''
 	
 	global SRAM_clock_freq, Clock_freq
 	check_sram_overflow(index_sram_chunk)
-	pipe_2_3_time, output_CBUF_chunk = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet)
+	pipe_2_3_time, output_CBUF_chunk = level_two_pipeline_cbuf_delivery(resnet_flag,index_sram_chunk,index_cbuf_chunk,cached_for_resnet,flag_fc)
 	pipe_2_3_time = pipe_2_3_time/Clock_freq
 	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)/Clock_freq
 	copy_time = time_SRAM_DRAM()/SRAM_clock_freq
 	
-	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))//Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
+	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk,flag_fc) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))//Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
 	time_subsequent_chunks =  pipe_2_3_time + pipe_1_4_time + copy_time
 	total_time_SRAM_chunk = 0  # time taken to empty the chunk that was stored in SRAM from DRAM, these chunks are mentioned in SRAM_CHUNKS_FROM_DRAM array
 	'''first we compute the time to finish the chunk stored in SRAM '''
@@ -728,7 +742,7 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	return total_time_SRAM_chunk, output_CBUF_chunk
 
 '''Operation'''
-def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
+def total_time_per_layer(direction,resnet_flag, flag_fc,index_input,cached_for_resnet):
 	'''calculate the total time to finish one layer'''
 	# add exception handling here later
 	global previous_output_in_SRAM, weights , feature, GDDR6_clock_freq
@@ -742,7 +756,7 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 		total_time_layer += time_DRAM_SRAM(direction, index_input,i)/GDDR6_clock_freq
 		for j in range(total_chunks_from_SRAM_CBUF_per_SRAM_chunk[i]): # all the sram chunks and the associated sub-chunks for each of the sram chunks must be computed per layer	
 			logging.info("Computing for chunk number {0} in CBUF from SRAM. Top level chunk number in SRAM from DRAM is {1}".format(j,i))
-			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
+			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,flag_fc,cached_for_resnet,i,j,)
 			total_time_layer += time
 			#previous_output_in_SRAM += data
 	previous_output_in_SRAM = feature[index_input + 1] 
@@ -751,19 +765,46 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	logging.info("At this point layer: {} has been computed and the time to do so has been calculated.".format(index_input))
 	return total_time_layer
 
-def time_SRAM_PDP(index_input):
-	''' calculate time to compute Max pooling layers'''
+delay_SRAM_to_PDP = 128 
+delay_PDP_to_SRAM = 128  # assuming each RDMA and WDMA have a latency of 128 cycles
+
+def time_SRAM_PDP_back(index_input):
+	''' calculate time to compute Max pooling layers
+		Data is transferred from SRAM to PDP and then back to SRAM
+		Computing for off-fly mode (data is received from memory instead of SDP) (there will be performance drop in this case)
+		Later on-fly mode can be considered when the criteria is met
+		# the peak performance is 64bits/cycle'''
+	''' check this logic '''
+	global feature, weights, delay_PDP
+	RDMA_size = 8192 #bits
+	total_time_max_pooling = 0
+	total_data_to_transfer = feature[index_input] + weights[index_input]
+	number_of_times_RDMA_fills = math.ceil(total_data_to_transfer/RDMA_size)
 	print("IN time_SRAM_PDP....")
+	for i in range(number_of_times_RDMA_fills):
+		total_time_max_pooling += delay_SRAM_to_PDP + delay_PDP_to_SRAM 
+	
+	return total_time_max_pooling
+
+delay_SRAM_to_RUBIK = 128 # assuming SRAM to RUBIK latency is same as SRAM to PDP
+delay_RUBIK_to_SRAM = 128 # -----------------------------------------------------
 
 def time_SRAM_RUBIK(index_input):
 	''' calculate time for Reshaping'''
-	print("IN time_SRAM_RUBIK...")
+	total_time_reshaping = 0
+	global feature
+	RDMA_size = 8192 # bits
+	total_data_to_transfer = feature[index_input]
+	number_of_times_RDMA_fills = math.ceil(total_data_to_transfer/RDMA_size)
+	for i in range(number_of_times_RDMA_fills):
+		total_time_reshaping += delay_SRAM_to_RUBIK + delay_RUBIK_to_SRAM  
 
-def time_FC(index_input):
-	print("IN time_FC...")
+	return total_time_reshaping
 
-def time_PROPOSAL():  # does it require index_input ??
-	print("IN time_PROPOSAL...")
+# def time_PROPOSAL():  # does it require index_input ??
+# 	print("IN time_PROPOSAL...")
+# 	return time_proposal
+
 # '''Non-Operation'''
 # def total_layers_in_network():
 # 	''' calculate total convolution layers in the network '''
@@ -803,42 +844,41 @@ def total_inference_time_rcnn():
 	total_inference_time = 0
 	for i in range(1,23):
 		if (i%3 == 0 and i<=6):
-			logging.info("MAx pooling... " + "Layer: {}".format(i))
-			total_inference_time += time_SRAM_PDP(i)   # add the time for Max pooling
+			logging.info("MAX pooling... " + "Layer: {}".format(i))
+			total_inference_time += time_SRAM_PDP_back(i)   # add the time for Max pooling
 		elif (i == 10 or i == 14):
-			logging.info("MAx pooling..." + "Layer: {}".format(i))
-			total_inference_time += time_SRAM_PDP(i)   # add the time for Max pooling
+			logging.info("MAX pooling..." + "Layer: {}".format(i))
+			total_inference_time += time_SRAM_PDP_back(i)   # add the time for Max pooling
 		elif (i == 18):
 			logging.info("Subrountine beginning...")
 			logging.info("Convolution operation... No RELU. Output of this convolution should feed the two subrountine defined below" + "Layer: {}".format(i))
 			resp_time_1 = subroutine_1(i)
 			total_inference_time += resp_time_1
-			print(resp_1)
 			resp_time_2 = subroutine_2(i)
 			total_inference_time += resp_time_2
-			print(resp_2)
-			logging.info("Performing Proposal layer...")
-			proposal_time = time_PROPOSAL()
-			total_inference_time += proposal_time
+			
 		elif (i == 19):
 			logging.info("Using output of Subrountine_1 and Subrountine_2 to compute ROI_POOLING...")
-			total_inference_time += time_SRAM_PDP(i)
+			total_inference_time += time_SRAM_PDP_back(i)
 		elif (i == 20 or i == 21):
 			logging.info("Performing Fully connected operation..." + "Layer: {}".format(i))
-			total_inference_time += time_FC(i)
+			total_inference_time += total_time_per_layer('right',0,'fc',i,0)
 		elif(i == 22):
 			logging.info("Subroutine_3 beginnging... ")
-			resp_3 = subroutine_3('conv')
+			resp_3 = subroutine_3(i)
 			print(resp_3)
-			logging.info("Computing Bbox_predictions...")
+			#logging.info("Computing Bbox_predictions...")
 			logging.info("--------Completed Faster RCNN-----------")
 			# chen's code here
 		else:
 			logging.info("convolution operation with RELU..." + "Layer: {}".format(i))
-			total_inference_time += total_time_per_layer('right', 0, i, 0)
+			total_inference_time += total_time_per_layer('right', 0, 'conv', i, 0)
+			SRAM_CHUNKS_FROM_DRAM = []
+			CBUF_CHUNKS_FROM_SRAM = []
 	
 	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
+
 ########### Subroutines for Faster-R-CNN ###############
 '''Operation'''
 def subroutine_1(index_input):
@@ -847,13 +887,13 @@ def subroutine_1(index_input):
 	for i in range(4):
 		if(i%2 != 0):
 			logging.info("Reshaping...")
-			subroutine_time += time_SRAM_RUBIK(i)
+			subroutine_time += time_SRAM_RUBIK(index_input)
 		elif(i == 0):
-			logging.info("Convolution operation... No RELU" + "Layer: {}".format(i))
-			subroutine_time += total_time_per_layer('right', 0, index_input, 0)
+			logging.info("Convolution operation... With RELU" + "Layer: {}".format(i))
+			subroutine_time += total_time_per_layer('right', 0, 'conv',index_input, 0)
 		else:
 			logging.info("Performing softmax operation... ")
-			time_softmax = softmax()
+			time_softmax = total_time_per_layer('right',0,'fc',index_input,0)
 			subroutine_time += time_softmax
 	return (subroutine_time)
 
@@ -862,21 +902,23 @@ def subroutine_2(index_input):
 	''' take the convolution input, perform the subrountine '''
 	subroutine_time = 0
 	logging.info("Performing Convolution operation.. No RELU")
-	subroutine_time += total_time_per_layer('right', 0, index_input, 0)
+	subroutine_time += total_time_per_layer('right', 0, 'conv',index_input, 0)
 	return (subroutine_time)
 
 '''Operation'''
-def subroutine_3():
+def subroutine_3(index_input):
 	''' take input of previous layer and compute the class probabilites and scores '''
 	subroutine_time = 0
 	logging.info("Computing class scores...")
-	# chen's code here
+	subroutine_time += total_time_per_layer('right', 0, 'fc',index_input, 0)
 	logging.info("Computing class probabilites...")
+	subroutine_time += total_time_per_layer('right', 0, 'fc',index_input, 0)
 	return (subroutine_time)
 
 ########################################################
 #=========================================================================================
 
+# REMOVE FOR FASTER R-CNN
 # '''Operation'''
 # def total_inference_time():
 # 	'''calculate the total inference time 
