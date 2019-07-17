@@ -775,7 +775,7 @@ def time_SRAM_PDP_back(index_input):
 		Later on-fly mode can be considered when the criteria is met
 		# the peak performance is 64bits/cycle'''
 	''' check this logic '''
-	global feature, weights, delay_PDP
+	global feature, weights, delay_PDP, Clock_freq
 	RDMA_size = 8192 #bits
 	total_time_max_pooling = 0
 	total_data_to_transfer = feature[index_input] + weights[index_input]
@@ -783,7 +783,7 @@ def time_SRAM_PDP_back(index_input):
 	print("IN time_SRAM_PDP....")
 	for i in range(number_of_times_RDMA_fills):
 		total_time_max_pooling += delay_SRAM_to_PDP + delay_PDP_to_SRAM 
-	
+	total_time_max_pooling = total_time_max_pooling/Clock_freq
 	return total_time_max_pooling
 
 delay_SRAM_to_RUBIK = 128 # assuming SRAM to RUBIK latency is same as SRAM to PDP
@@ -792,13 +792,13 @@ delay_RUBIK_to_SRAM = 128 # ----------------------------------------------------
 def time_SRAM_RUBIK(index_input):
 	''' calculate time for Reshaping'''
 	total_time_reshaping = 0
-	global feature
+	global feature, Clock_freq
 	RDMA_size = 8192 # bits
 	total_data_to_transfer = feature[index_input]
 	number_of_times_RDMA_fills = math.ceil(total_data_to_transfer/RDMA_size)
 	for i in range(number_of_times_RDMA_fills):
 		total_time_reshaping += delay_SRAM_to_RUBIK + delay_RUBIK_to_SRAM  
-
+	total_time_reshaping = total_time_reshaping/Clock_freq
 	return total_time_reshaping
 
 # def time_PROPOSAL():  # does it require index_input ??
