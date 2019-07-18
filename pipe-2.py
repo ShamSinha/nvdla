@@ -169,7 +169,9 @@ GDDR6_writing_time = t0_GDDR6_512bits  # time taken to write 512 bits of data to
 GDDR6_reading_time = t1_GDDR6_512bits  # time taken to read 512 bits of data from GDDR6
 GDDR6_clock_freq = gddr6_clk
 
-SRAM_size = size_SRAM()  #MB  where did the 2 come from we need to figure this out
+size_SRAM()
+print(weights)
+SRAM_size = 4 #size_SRAM()  #MB  where did the 2 come from we need to figure this out
 SRAM_size_in_bits = SRAM_size*1024*1024*8 # sram size in bits 
 chunk_size_DRAM_SRAM = 0.5*1024*1024*8      # = SRAM_size_in_bits - previous_output_in_SRAM or total_data_to_transfer (<SRAM_size_in_bits)
 SRAM_writing_time = t0_SRAM_512bits    # time taken to write 512 bits of data to SRAM
@@ -255,8 +257,10 @@ def length_SRAM_CHUNKS_FROM_DRAM(index_input):
 	''' return length of SRAM_CHUNKS_FROM_DRAM for every new layer '''
 	if(index_input == 0):
 		total_data_to_transfer = feature[index_input] + weights[index_input]
+		print("Total data to transfer: ", total_data_to_transfer)
 	else:
 		total_data_to_transfer =  weights[index_input]
+		print("Total data to transfer (index_input!=0): ", total_data_to_transfer)
 	total_chunks = generate_chunks_for_sram(total_data_to_transfer)
 	make_chunks_SRAM_CBUF()
 	#print("CBUF_CHUNKS_FROM_SRAM: {}".format(CBUF_CHUNKS_FROM_SRAM))
@@ -841,38 +845,43 @@ def total_inference_time_rcnn():
 			Nested subroutines will do rest of the computation after Convolution 5_3 has been calculated, until the 
 			first FC layer. 
 	'''
+	global SRAM_CHUNKS_FROM_DRAM, CBUF_CHUNKS_FROM_SRAM
 	total_inference_time = 0
 	for i in range(1,23):
 		if (i%3 == 0 and i<=6):
 			logging.info("MAX pooling... " + "Layer: {}".format(i))
-			total_inference_time += time_SRAM_PDP_back(i)   # add the time for Max pooling
+			total_inference_time += time_SRAM_PDP_back(i-1)   # add the time for Max pooling
 		elif (i == 10 or i == 14):
 			logging.info("MAX pooling..." + "Layer: {}".format(i))
-			total_inference_time += time_SRAM_PDP_back(i)   # add the time for Max pooling
+			total_inference_time += time_SRAM_PDP_back(i-1)   # add the time for Max pooling
 		elif (i == 18):
 			logging.info("Subrountine beginning...")
 			logging.info("Convolution operation... No RELU. Output of this convolution should feed the two subrountine defined below" + "Layer: {}".format(i))
 			resp_time_1 = subroutine_1(i)
 			total_inference_time += resp_time_1
 			resp_time_2 = subroutine_2(i)
-			total_inference_time += resp_time_2
-			
+			total_inference_time += resp_time_2			
 		elif (i == 19):
 			logging.info("Using output of Subrountine_1 and Subrountine_2 to compute ROI_POOLING...")
-			total_inference_time += time_SRAM_PDP_back(i)
+			total_inference_time += time_SRAM_PDP_back(i + 4)
 		elif (i == 20 or i == 21):
 			logging.info("Performing Fully connected operation..." + "Layer: {}".format(i))
-			total_inference_time += total_time_per_layer('right',0,'fc',i,0)
-		elif(i == 22):
+			total_inference_time += total_time_per_layer('right',0,'fc',i+4,0)
+		elif(i == 22 ):
 			logging.info("Subroutine_3 beginnging... ")
 			resp_3 = subroutine_3(i)
-			print(resp_3)
+			#print(resp_3)
 			#logging.info("Computing Bbox_predictions...")
+			total_inference_time += resp_3
 			logging.info("--------Completed Faster RCNN-----------")
-			# chen's code here
+		elif(i>=23):
+			logging.info("convolution operation with RELU..." + "Layer: {}".format(i))
+			total_inference_time += total_time_per_layer('right', 0, 'conv', i-1, 0)
+			SRAM_CHUNKS_FROM_DRAM = []
+			CBUF_CHUNKS_FROM_SRAM = []
 		else:
 			logging.info("convolution operation with RELU..." + "Layer: {}".format(i))
-			total_inference_time += total_time_per_layer('right', 0, 'conv', i, 0)
+			total_inference_time += total_time_per_layer('right', 0, 'conv', i-1, 0)
 			SRAM_CHUNKS_FROM_DRAM = []
 			CBUF_CHUNKS_FROM_SRAM = []
 	
@@ -883,36 +892,51 @@ def total_inference_time_rcnn():
 '''Operation'''
 def subroutine_1(index_input):
 	''' take the convolution input, perform the subrountine '''
+	global SRAM_CHUNKS_FROM_DRAM, CBUF_CHUNKS_FROM_SRAM
 	subroutine_time = 0
-	for i in range(4):
-		if(i%2 != 0):
-			logging.info("Reshaping...")
-			subroutine_time += time_SRAM_RUBIK(index_input)
-		elif(i == 0):
-			logging.info("Convolution operation... With RELU" + "Layer: {}".format(i))
-			subroutine_time += total_time_per_layer('right', 0, 'conv',index_input, 0)
-		else:
-			logging.info("Performing softmax operation... ")
-			time_softmax = total_time_per_layer('right',0,'fc',index_input,0)
-			subroutine_time += time_softmax
+	logging.info("Convolution operation... With RELU" + "Layer: {}".format(index_input))
+	subroutine_time += total_time_per_layer('right', 0, 'conv',index_input - 1, 0)
+	SRAM_CHUNKS_FROM_DRAM = []
+	CBUF_CHUNKS_FROM_SRAM = []
+	logging.info("Convolution operation... With RELU" + "Layer: {}".format(index_input + 1))
+	subroutine_time += total_time_per_layer('right', 0, 'conv',index_input, 0)
+	SRAM_CHUNKS_FROM_DRAM = []
+	CBUF_CHUNKS_FROM_SRAM = []
+	logging.info("Reshaping...")
+	subroutine_time += time_SRAM_RUBIK(index_input+1)
+	logging.info("Performing softmax operation... ")
+	time_softmax = total_time_per_layer('right',0,'fc',index_input + 2,0)
+	SRAM_CHUNKS_FROM_DRAM = []
+	CBUF_CHUNKS_FROM_SRAM = []
+	subroutine_time += time_softmax
 	return (subroutine_time)
 
 '''Operation'''
 def subroutine_2(index_input):
 	''' take the convolution input, perform the subrountine '''
+	global SRAM_CHUNKS_FROM_DRAM, CBUF_CHUNKS_FROM_SRAM
 	subroutine_time = 0
 	logging.info("Performing Convolution operation.. No RELU")
-	subroutine_time += total_time_per_layer('right', 0, 'conv',index_input, 0)
+	subroutine_time += total_time_per_layer('right', 0, 'conv',index_input+3, 0)
+	SRAM_CHUNKS_FROM_DRAM = []
+	CBUF_CHUNKS_FROM_SRAM = []
+	logging.info("Reshaping...")
+	subroutine_time += time_SRAM_RUBIK(index_input + 4)
 	return (subroutine_time)
 
 '''Operation'''
 def subroutine_3(index_input):
 	''' take input of previous layer and compute the class probabilites and scores '''
+	global SRAM_CHUNKS_FROM_DRAM, CBUF_CHUNKS_FROM_SRAM
 	subroutine_time = 0
 	logging.info("Computing class scores...")
-	subroutine_time += total_time_per_layer('right', 0, 'fc',index_input, 0)
+	subroutine_time += total_time_per_layer('right', 0, 'fc',index_input+4, 0)
+	SRAM_CHUNKS_FROM_DRAM = []
+	CBUF_CHUNKS_FROM_SRAM = []
 	logging.info("Computing class probabilites...")
-	subroutine_time += total_time_per_layer('right', 0, 'fc',index_input, 0)
+	subroutine_time += total_time_per_layer('right', 0, 'fc',index_input+5, 0)
+	SRAM_CHUNKS_FROM_DRAM = []
+	CBUF_CHUNKS_FROM_SRAM = []
 	return (subroutine_time)
 
 ########################################################
