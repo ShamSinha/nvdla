@@ -138,10 +138,10 @@ def size_SRAM():
  	global feature
  	global total
  	t = 0
- 	with open('weight-size-rcnn.txt', 'r') as f:
+ 	with open('./weight-size-rcnn.txt', 'r') as f:
  		for line in f:
  			weights.append(int(line))
- 	with open('input-size-rcnn.txt', 'r') as f:
+ 	with open('./input-size-rcnn.txt', 'r') as f:
  		for line in f:
  			feature.append(int(line))
  	for i in range(len(weights)):
