@@ -110,7 +110,7 @@ import traceback
 import timeit
 
 from upsampling import upsampling
-from softmax import softmax
+
 # lists holding the various sizes in bits
 weights = []
 feature = []
@@ -124,6 +124,20 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)																	   #7																												#18
 
 t0_GDDR6_512bits,t1_GDDR6_512bits,gddr6_clk,t0_SRAM_512bits,t1_SRAM_512bits,sram_clk,t0_BDMA_20Deep,t0_CDMA,Writing_bits,t0_CBUF,t1_CBUF,t0_CSC,t0_CMAC,t0_CACC_Adder,t0_Assembly,t1_Assembly,t0_Delivery,t1_Delivery,t0_truncation,Assembly_writing_bits,t0_SDP,t1_SDP,delay_dram_sdp,data_dram_sdp_bits = (3,2.4,1500000000,2,2,1000000000,0,4,512,0,16,7,7,0,0,1,1,1,10,544,1,1,0,512)  # correct values used now for debugging
+
+tCCD = 2
+tRTP = 2
+tWL = 6
+tCL = 15
+tDQ = 2
+tRCD = 10
+tRP = 22.5     # 15 ns
+tRC = 76.5     # 51 ns
+tWR = 22.5     # 15 ns
+t_refresh = 0
+t_rest = 0
+t_read = tRCD + 63*tCCD + tRTP + tRP +tCL
+t_write = tRCD + 63*tCCD + tWL + tDQ + tWR + tRP
 
 ''' Important Note - input-size.txt =  75 lines
 					 weight-size.txt = 75 lines '''
@@ -184,12 +198,44 @@ SRAM_CHUNKS_FROM_DRAM = []  # stores the values for each chunk that will be tran
 
 previous_output_in_SRAM = 0 # initially previous output is zero
 
+def create_rows(data_to_transfer):
+	''' Input the data to be transferred '''
+	n = math.ceil(data_to_transfer/(64*512))
+	return n
+
+def read_time(data_size):
+	'''calculate read time from GDDR6 for data to be transferred
+	   Data to be transferred = n,  from GDDR6 to SRAM
+	'''
+	global t_rest, t_refresh, t_read
+	t_sum = 0
+	t_total = 0
+	n = create_rows(data_size)
+	for i in range(n+1):	#read one layer
+		t_total = t_total + t_read	#no refresh
+		if t_total > 2850:	#refresh judgement  
+			t_left = 2850 - (t_total - t_read)	#how many tCK in left refresh row
+			cell = 64-(t_left-10)/2-1	#how many cells in right refresh row
+			if t_left < 10:	#refresh occurs in ACT
+				t_refresh = t_refresh + 256.5
+			elif cell == 0:	#refresh occurs in PRE
+				t_refresh = t_refresh + 180
+			else:	#refresh occurs in READ
+				t_refresh = t_refresh + 204.5
+			t_sum = t_sum + t_total - t_read + t_left + t_refresh
+			t_total = 20 + cell*2	#the right time in refresh row
+			t_refresh = 0
+		if i == n:	#the last row add to sum
+			t_sum = t_sum + t_total - t_rest
+			t_rest = t_total
+	return (t_sum)
+
 '''Operation'''
 def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 	''' check for the direction in which the data should be transferred 
 		right means DRAM -> SRAM
 		left  means SRAM -> DRAM
-	
+
 	Note : DRAM  ------ active 
 		   SRAM  ------ active
 		   Other ------ idle   
@@ -199,7 +245,7 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 	global GDDR6_reading_time, weights, feature, SRAM_writing_time, delay_bdma, SRAM_CHUNKS_FROM_DRAM,GDDR6_clock_freq,SRAM_clock_freq
 	stages = {'dram':'active', 'sram':'active', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
 	logger.info("Active and Idle stages : {}".format(stages))
-	
+
 	total_data_to_transfer = feature[index_input] + weights[index_input] # total data to be transferred from DRAM -> SRAM 
 
 	if direction == 'right':
@@ -212,17 +258,18 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 			''' At the end of this all data for convolution is going to present in SRAM, now DRAM is idle'''
 
 			logger.info("SRAM can fit all data... Proceeding...")
-			total_chunks_to_read = math.ceil(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]/chunks_read_size)
-			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time  # time taken to transfer just the first chunk of 512 bits 
+			#total_chunks_to_read = math.ceil(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]/chunks_read_size)
+			total_transfer_time = read_time(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk])
+			#transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time  # time taken to transfer just the first chunk of 512 bits 
 
 			# for the remaining chunks
-			for chunk in range(total_chunks_to_read-1):
-				# for the remaining chunks, since Pipe 1 is established now, the time taken now would be only as fast as the slowest component i.e. GDDR6 read time
-				# We could have multiplied, but for loop gives a better feel for transfer I think!
-				total_transfer_time += GDDR6_reading_time
+			# for chunk in range(total_chunks_to_read-1):
+			# 	# for the remaining chunks, since Pipe 1 is established now, the time taken now would be only as fast as the slowest component i.e. GDDR6 read time
+			# 	# We could have multiplied, but for loop gives a better feel for transfer I think!
+			# 	total_transfer_time += GDDR6_reading_time
 
-			# Now the total time taken can simply be added for first set of data to transfer into SRAM 
-			total_transfer_time = total_transfer_time + transfer_time_first_chunk
+			# # Now the total time taken can simply be added for first set of data to transfer into SRAM 
+			# total_transfer_time = total_transfer_time + transfer_time_first_chunk
 			logging.info("Total time to transfer : {}".format(total_transfer_time))
 			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")
 			
@@ -232,16 +279,16 @@ def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
 				to split 
 				Note that the core logic for calculating time would remain the same '''
 			logger.info("SRAM cannot fit all data at once... Proceeding with smaller chunks...")
-			total_chunks_to_read = int(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]//chunks_read_size) + int(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]%chunks_read_size)
-			transfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time # time taken to transfer just the first chunk of 512 bits 
-
+			#total_chunks_to_read = int(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]//chunks_read_size) + int(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk]%chunks_read_size)
+			#ransfer_time_first_chunk = GDDR6_reading_time + delay_bdma + SRAM_writing_time # time taken to transfer just the first chunk of 512 bits 
+			total_transfer_time = read_time(SRAM_CHUNKS_FROM_DRAM[index_sram_chunk])
 			# for the remaining chunks
-			for chunk in range(total_chunks_to_read-1):
-				# for the remaining chunks, since Pipe 1 is established now, the time taken now would be only as fast as the slowest component i.e. GDDR6 read time
-				# We could have multiplied, but for loop gives a better feel for transfer I think!
-				total_transfer_time += GDDR6_reading_time
+			# for chunk in range(total_chunks_to_read-1):
+			# 	# for the remaining chunks, since Pipe 1 is established now, the time taken now would be only as fast as the slowest component i.e. GDDR6 read time
+			# 	# We could have multiplied, but for loop gives a better feel for transfer I think!
+			# 	total_transfer_time += GDDR6_reading_time
 			# Now the total time taken can simply be added for first set of data to transfer into SRAM 
-			total_transfer_time = total_transfer_time + transfer_time_first_chunk
+			#total_transfer_time = total_transfer_time + transfer_time_first_chunk
 			logging.info("Total time to transfer : {}".format(total_transfer_time))
 			logging.info("At this point the data for Layer " + str(index_input)+ " of YOLOv3 has been transferred to SRAM")		
 		
@@ -616,6 +663,35 @@ def select_resnet(flag):
 precision_of_output_in_SRAM = 8 # bits 
 SRAM_reading_bandwidth = 512 # bits
 
+def write_time(data_size):
+	'''calculate write time for GDDR6 for data to be transferred 
+	   Data to be transferred = n, from SRAM to GDDR6
+	'''
+	global t_rest, t_refresh, t_write
+	t_sum = 0
+	t_total = 0
+	m = create_rows(data_size)
+	for j in range(m+1):	#write one layer
+		t_total = t_total + t_write#no refresh
+		if t_total > 2850:	#refresh judgement
+			t_left = 2850 - (t_total - t_write)	#how many tCK in left refresh row
+			cell = 64-(t_left-10)/2-1	#how many cells in right refresh row
+			if t_left < 10:
+				t_refresh = t_refresh + 256.5
+			elif cell == 0:
+				t_refresh = t_refresh + 180
+			else:
+				t_refresh = t_refresh + 204.5
+
+			t_sum = t_sum + t_total - t_write + t_left + t_refresh
+			t_total = tRCD + tCCD*(cell-1) + tWL + tDQ + tWR + tRP
+			t_refresh = 0
+
+		if j == m:
+			t_sum = t_sum + t_total - t_rest
+			t_rest = t_total
+	return(t_sum)
+
 '''Operation'''
 def time_SRAM_DRAM():
 	''' calculate time taken to transfer the output stored in SRAM coming from SDP. '''
@@ -623,16 +699,16 @@ def time_SRAM_DRAM():
 	global GDDR6_writing_time, SRAM_reading_time, data_size_Delivery_Group, precision_of_output_in_SRAM,SRAM_reading_bandwidth
 
 	Output_data_size_SRAM = (data_size_Delivery_Group*precision_of_output_in_SRAM)/precision_Delivery_SRAM
-	total_reads_from_SRAM = math.ceil(Output_data_size_SRAM/SRAM_reading_bandwidth)
-	time_first_read_from_SRAM = SRAM_reading_time + delay_bdma + GDDR6_writing_time
-	total_transfer_time = 0
+	#total_reads_from_SRAM = math.ceil(Output_data_size_SRAM/SRAM_reading_bandwidth)
+	#time_first_read_from_SRAM = SRAM_reading_time + delay_bdma + GDDR6_writing_time
+	#total_transfer_time = 0
 	logging.info("Size of Output data in SRAM {}".format(data_size_Delivery_Group))
 	logger.info("SRAM -> DRAM")
+	total_transfer_time = write_time(Output_data_size_SRAM) + SRAM_reading_time + delay_bdma
+	# for i in range(total_reads_from_SRAM -1):
+	# 	total_transfer_time += GDDR6_writing_time
 
-	for i in range(total_reads_from_SRAM -1):
-		total_transfer_time += SRAM_reading_time
-
-	total_transfer_time = total_transfer_time + time_first_read_from_SRAM	
+	#total_transfer_time = total_transfer_time + time_first_read_from_SRAM	
 	logging.info("Total time to transfer : {}".format(total_transfer_time))
 	logging.info("Copy of Output data from chunk in SRAM moved to DRAM")
 	
@@ -798,12 +874,12 @@ def total_inference_time():
 			logging.info("Completed Layer..")
 		SRAM_CHUNKS_FROM_DRAM = []      # reinitialize after finishing a layer
 		CBUF_CHUNKS_FROM_SRAM = []  	# ---------------"--------------------	  # ---------------"--------------------
-	time_softmax = softmax()   			# assuming cpu clock freq = 2.7Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
+	#time_softmax = softmax()   			# assuming cpu clock freq = 2.7Ghz, running on 2.7 GHz Intel Core i5, 8 GB 1867 MHz DDR3 
 	time_upsampling = upsampling()  	# ------------------------------------------"""------------------------------------------
-	total_inference_time = time_inference + time_softmax + time_upsampling  # assuming cpu and nvdla run at same clock frequency
+	total_inference_time = time_inference + time_upsampling  # assuming cpu and nvdla run at same clock frequency
 	logging.info("TOTAL INFERENCE TIME (in sec): {}".format(time_inference))
 	#logging.info("Time : {}".format(time_sec))
-	logging.info("UPSAMPLING TIME: {0}	SOFTMAX: {1}".format(time_upsampling, time_softmax))
+	logging.info("UPSAMPLING TIME: {0}".format(time_upsampling))
 	logging.info("TOTAL INFERENCE TIME (CLK FREQ = 2.7GHz) (in seconds): {}".format(total_inference_time))
 	logging.info("COMPLETED INFERERENCE ON IMAGE SUCCESSFULLY!!!")
 
