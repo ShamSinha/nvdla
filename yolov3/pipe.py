@@ -185,7 +185,7 @@ GDDR6_writing_time = t0_GDDR6_512bits  # time taken to write 512 bits of data to
 GDDR6_reading_time = t1_GDDR6_512bits  # time taken to read 512 bits of data from GDDR6
 GDDR6_clock_freq = gddr6_clk
 
-SRAM_size = size_SRAM()  #MB  where did the 2 come from we need to figure this out
+SRAM_size = size_SRAM() + 1  #MB  where did the 2 come from we need to figure this out
 SRAM_size_in_bits = SRAM_size*1024*1024*8 # sram size in bits 
 chunk_size_DRAM_SRAM = 0.5*1024*1024*8      # = SRAM_size_in_bits - previous_output_in_SRAM or total_data_to_transfer (<SRAM_size_in_bits)
 SRAM_writing_time = t0_SRAM_512bits    # time taken to write 512 bits of data to SRAM
@@ -467,7 +467,7 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 
 '''
 
-size_atomic_op = 16896 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision.
+size_atomic_op = 8704 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64x16 while considering int8 precision.
 delay_csc = t0_CSC
 delay_cmac = t0_CMAC
 delay_adder_array = t0_CACC_Adder
@@ -788,7 +788,7 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)/Clock_freq
 	copy_time = time_SRAM_DRAM()/SRAM_clock_freq
 	
-	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))//Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
+	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))/Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
 	time_subsequent_chunks =  pipe_2_3_time + pipe_1_4_time + copy_time
 	total_time_SRAM_chunk = 0  # time taken to empty the chunk that was stored in SRAM from DRAM, these chunks are mentioned in SRAM_CHUNKS_FROM_DRAM array
 	'''first we compute the time to finish the chunk stored in SRAM '''
@@ -821,7 +821,7 @@ def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,i,j)
 			total_time_layer += time
 			#previous_output_in_SRAM += data
-	previous_output_in_SRAM = feature[index_input + 1] 
+	previous_output_in_SRAM = feature[index_input] 
 	print("This is the previous output in SRAM",previous_output_in_SRAM, " index_input: ",index_input)
 	logging.info("Total time to transfer (---IN total_time_per_layer()---): {}".format(total_time_layer))
 	logging.info("At this point layer: {} has been computed and the time to do so has been calculated.".format(index_input))

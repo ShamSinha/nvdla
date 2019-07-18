@@ -469,7 +469,7 @@ def time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk):
 
 '''
 
-size_atomic_op = 16896 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64xKv while considering int8 precision.
+size_atomic_op = 8704 #41472, 25088, 16896, , #bits is the total size of input-- 1x1x64 + kernel--1x1x64xKv while considering int8 precision.
 delay_csc = t0_CSC
 delay_cmac = t0_CMAC
 delay_adder_array = t0_CACC_Adder
@@ -806,7 +806,7 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,flag_fc,cached_for_resnet,in
 	pipe_1_4_time = level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk)/Clock_freq
 	copy_time = time_SRAM_DRAM()/SRAM_clock_freq
 	
-	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk,flag_fc) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))//Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
+	time_first_chunk = (time_SRAM_CBUF(index_sram_chunk, index_cbuf_chunk) + time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk,flag_fc) + time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk))/Clock_freq   # time taken to compute  first chunk in CBUF and transfer to Delivery Group
 	time_subsequent_chunks =  pipe_2_3_time + pipe_1_4_time + copy_time
 	total_time_SRAM_chunk = 0  # time taken to empty the chunk that was stored in SRAM from DRAM, these chunks are mentioned in SRAM_CHUNKS_FROM_DRAM array
 	'''first we compute the time to finish the chunk stored in SRAM '''
@@ -839,7 +839,7 @@ def total_time_per_layer(direction,resnet_flag, flag_fc,index_input,cached_for_r
 			time , data = total_time_per_SRAM_chunk(direction,resnet_flag,flag_fc,cached_for_resnet,i,j,)
 			total_time_layer += time
 			#previous_output_in_SRAM += data
-	previous_output_in_SRAM = feature[index_input + 1] 
+	previous_output_in_SRAM = feature[index_input ] 
 	print("This is the previous output in SRAM",previous_output_in_SRAM, " index_input: ",index_input)
 	logging.info("Total time to transfer (---IN total_time_per_layer()---): {}".format(total_time_layer))
 	logging.info("At this point layer: {} has been computed and the time to do so has been calculated.".format(index_input))
