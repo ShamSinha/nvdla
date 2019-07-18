@@ -3,9 +3,9 @@
 
 # Ownership
 # Improve this section later
-# __author__ = ""
+# __author__ = "Aditya Prasad, Shubham Kumar, Chen Haoji"
 # __copyright__ = “Copyright 2019, AI ACCELERATOR PROJECT”
-# __credits__ = []
+# __credits__ = ['Aditya Prasad','Shubham Kumar','Chen Haoji', 'Moonki', 'Yangyi', 'Dhyeo']
 # __license__ = “Decide Later”
 # __version__ = “0.1.0”
 # __maintainer__ = “Digital Systems Lab, Hanyang University”

@@ -3,14 +3,14 @@
 
 # Ownership
 # Improve this section later
-# __author__ = "Aditya Prasad"
-# __copyright__ = “Copyright 2019, AI ACCELERATOR PROJECT”
+#  __author__ = "Aditya Prasad, Subhham Kumar, Chen Haoji"
+#  __copyright__ = “Copyright 2019, AI ACCELERATOR PROJECT”
 # __credits__ = ["Shubham Kumar", "Kundan Doiphode", "Chen Haoji", "Moonki", "Yangyi", "Dhyeo"]
-# __license__ = “Decide Later”
-# __version__ = “0.1.0”
-# __maintainer__ = “Digital Systems Lab, Hanyang University”
-# __email__ = “nvdlagroup@gmail.com”
-# __status__ = “Dev”
+#  __license__ = “Decide Later”
+#  __version__ = “0.1.0”
+#  __maintainer__ = “Digital Systems Lab, Hanyang University”
+#  __email__ = “nvdlagroup@gmail.com”
+#  __status__ = “Dev”
 
 ''' FASTER RCNN INFERENCE CALCULATION'''
 
