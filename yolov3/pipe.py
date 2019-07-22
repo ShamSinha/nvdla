@@ -12,9 +12,9 @@
 # __email__ = “nvdlagroup@gmail.com”
 # __status__ = “Dev”
 
-''' YOLOv3 INFERENCE CALCULATION'''
+''' YOLOv3 INFERENCE CALCULATION
 
-''' Given time taken to in each module of NVDLA along with the time between modules we can calculate the total time taken
+Given time taken to in each module of NVDLA along with the time between modules we can calculate the total time taken
 	to compute a layer in a neural network 
 
 	Parameters to keep in minds (there are too many of them! Good luck keeping track of all!!)
@@ -147,7 +147,7 @@ def size_SRAM():
  	''' Input two files 
  			Weight data file containing size of each weights in each layer
  			Input feature data file containing size of each feature in each layer
- 		Output 
+ 		Return 
  			max_size of input + weight in any layer
  	'''
  	global weights
@@ -169,23 +169,23 @@ def size_SRAM():
  
  	return (math.ceil(round(max_sum,3)))  # for the moment we take SRAM as 8 MB by adding 2.7 MB of additional storage space in on-chip SRAM
 
-# check that input and weight arrays are equal in length. This is not working properly 
+# check that input and weight arrays are equal in length.
 if(len(weights) == len(feature)):
 	logging.info("Continuing.. ")
 else:
 	logging.info("PROBLEM.... Exiting for now")
 	sys.exit(0)
-''' Lets us first try to achieve some answer for just one layer of a neural network 
-	This would be followed by second layer and the third one which will encompass the Resnet Layer
-	Once the three layers are done the same process will repeat continously until the entire network is completed
-	Remember to commit after each layer completion 
+
+'''We solve this inference problem layer by layer. 
+
+   Once a layer is complete we move to the next one until all layers in the network have been processed
 '''
 
 GDDR6_writing_time = t0_GDDR6_512bits  # time taken to write 512 bits of data to GDDR6
 GDDR6_reading_time = t1_GDDR6_512bits  # time taken to read 512 bits of data from GDDR6
 GDDR6_clock_freq = gddr6_clk
 
-SRAM_size = size_SRAM() + 1  #MB  where did the 2 come from we need to figure this out
+SRAM_size = size_SRAM()  #MB 
 SRAM_size_in_bits = SRAM_size*1024*1024*8 # sram size in bits 
 chunk_size_DRAM_SRAM = 0.5*1024*1024*8      # = SRAM_size_in_bits - previous_output_in_SRAM or total_data_to_transfer (<SRAM_size_in_bits)
 SRAM_writing_time = t0_SRAM_512bits    # time taken to write 512 bits of data to SRAM
@@ -194,7 +194,7 @@ SRAM_clock_freq = sram_clk
 
 delay_bdma = t0_BDMA_20Deep			   # time spent in bdma (useful for first transfer) difference between how long it takes for the first entry of sequence from GDDR6 to cross BDMA
 
-SRAM_CHUNKS_FROM_DRAM = []  # stores the values for each chunk that will be transferred from DRAM --> SRAM
+SRAM_CHUNKS_FROM_DRAM = []  # stores the values(in bits) for each chunk that will be transferred from DRAM --> SRAM
 
 previous_output_in_SRAM = 0 # initially previous output is zero
 
@@ -232,21 +232,25 @@ def read_time(data_size):
 
 '''Operation'''
 def time_DRAM_SRAM(direction, index_input,index_sram_chunk):
-	''' check for the direction in which the data should be transferred 
+	''' 
+	Caculate time taken to transfer given chunk from DRAM -> SRAM 
+	Input: index_sram_chunk
+	Return: total_transfer_time for that chunk of data in DRAM
+	check for the direction in which the data should be transferred 
 		right means DRAM -> SRAM
-		left  means SRAM -> DRAM
+		left  means SRAM -> DRAM (DEPRECATED, TODO: remove this parameter in next version)
 
 	Note : DRAM  ------ active 
 		   SRAM  ------ active
 		   Other ------ idle   
 	'''
 	print("///IN time_DRAM_SRAM()////")
-	dummy_time = 0 # garbage time (throw away later)
+	#dummy_time = 0 # garbage time (throw away later)
 	global GDDR6_reading_time, weights, feature, SRAM_writing_time, delay_bdma, SRAM_CHUNKS_FROM_DRAM,GDDR6_clock_freq,SRAM_clock_freq
 	stages = {'dram':'active', 'sram':'active', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
 	logger.info("Active and Idle stages : {}".format(stages))
 
-	total_data_to_transfer = feature[index_input] + weights[index_input] # total data to be transferred from DRAM -> SRAM 
+	#total_data_to_transfer = feature[index_input] + weights[index_input] # total data to be transferred from DRAM -> SRAM 
 
 	if direction == 'right':
 		logging.info("DRAM -> SRAM")
@@ -528,7 +532,7 @@ def time_CBUF_Assembly(index_sram_chunk, index_cbuf_chunk):
 	return total_transfer_time
 
 
-delay_truncation = t0_truncation
+delay_truncation = t0_truncation  # cycles in truncation array
 size_partial_sum_generate_per_atomic_op = 544 # bits in case of int8
 Assembly_writing_bandwidth = Assembly_writing_bits 
 Assemby_data_size = 0
@@ -556,6 +560,8 @@ def time_Assembly_Delivery(index_sram_chunk,index_cbuf_chunk):
 	
 	global Assembly_writing_bandwidth, delay_truncation, size_partial_sum_generate_per_atomic_op,CBUF_CHUNKS_FROM_SRAM,size_atomic_op, Assemby_data_size
 	total_transfer_time = 0
+	stages = {'dram':'idle', 'sram':'idle', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'active', 'Delivery':'active', 'SDP':'idle'}
+	logger.info("Active and Idle stages : {}".format(stages))
 	# calculate the total size in Assembly from the first chunk in CBUF 
 	chunk_in_cbuf = CBUF_CHUNKS_FROM_SRAM[index_sram_chunk][index_cbuf_chunk]
 	total_atomic_reads_from_cbuf = math.ceil(chunk_in_cbuf/size_atomic_op)
@@ -614,7 +620,8 @@ def time_Delivery_SRAM(resnet_flag, cached_for_resnet):
 		# CHECK ONCE LATER
 	
 	global Assemby_data_size,Delivery_Group_bandwidth,Delivery_writing_time,GDDR6_reading_time,data_DRAM_SDP,SDP_internal_buffer_size
-
+	stages = {'dram':'idle', 'sram':'active', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'active', 'SDP':'active'}
+	logger.info("Active and Idle stages : {}".format(stages))
 	data_size_Delivery_Group = (Assemby_data_size*precision_Delivery_SRAM*8)/34
 
 	total_reads_from_delivery = math.ceil(data_size_Delivery_Group/Delivery_Group_bandwidth)
@@ -656,6 +663,7 @@ def time_Delivery_SRAM(resnet_flag, cached_for_resnet):
 
 '''Non-Operation'''
 def select_resnet(flag):
+	'''decide resnet layer'''
 	if (flag == 1):
 		return True
 	return False
@@ -694,10 +702,11 @@ def write_time(data_size):
 
 '''Operation'''
 def time_SRAM_DRAM():
-	''' calculate time taken to transfer the output stored in SRAM coming from SDP. '''
+	''' calculate time taken to transfer the output stored in SRAM coming from SDP back into DRAM. '''
 	
 	global GDDR6_writing_time, SRAM_reading_time, data_size_Delivery_Group, precision_of_output_in_SRAM,SRAM_reading_bandwidth
-
+	stages = {'dram':'active', 'sram':'active', 'cbuf':'idle', 'cmac':'idle', 'Assembly':'idle', 'Delivery':'idle', 'SDP':'idle'}
+	logger.info("Active and Idle stages : {}".format(stages))
 	Output_data_size_SRAM = (data_size_Delivery_Group*precision_of_output_in_SRAM)/precision_Delivery_SRAM
 	#total_reads_from_SRAM = math.ceil(Output_data_size_SRAM/SRAM_reading_bandwidth)
 	#time_first_read_from_SRAM = SRAM_reading_time + delay_bdma + GDDR6_writing_time
@@ -765,6 +774,8 @@ def level_two_pipeline_sram_assembly(index_sram_chunk,index_cbuf_chunk):
 
 '''Non-Operation'''
 def MAX(t1, t2 , l):
+	'''calculate maximum of given values. 
+	   Return max(t1,t2) and associated list index value'''
 	if (t1 >= t2):
 		return t1, l[0]
 	return t2, l[1]
@@ -806,7 +817,7 @@ def total_time_per_SRAM_chunk(direction,resnet_flag,cached_for_resnet,index_sram
 '''Operation'''
 def total_time_per_layer(direction,resnet_flag, index_input,cached_for_resnet):
 	'''calculate the total time to finish one layer'''
-	# add exception handling here later
+	#TODO: add exception handling here later
 	global previous_output_in_SRAM, weights , feature, GDDR6_clock_freq
 	total_time_layer = 0
 	total_chunks_from_DRAM_SRAM = length_SRAM_CHUNKS_FROM_DRAM(index_input)
@@ -895,7 +906,8 @@ def update_sram(index_sram_chunk):
 '''Non-Operation'''
 def check_sram_overflow(index_sram_chunk):
 	''' this function tracks the data in SRAM during processing 
-		Reports overflow and exits if such an event occurs 
+		Reports overflow and exits if such an event occurs.
+
 		Otherwise returns filled space and percentage of filled space per data type (input, weight, output) 
 		Further we could provide chunk specific and associated input, weight, output values '''
 	global SRAM_size_in_bits
@@ -908,9 +920,6 @@ def check_sram_overflow(index_sram_chunk):
 		sys.exit(0)
 	logging.info("Space occupied in SRAM : {0}% by Input Data (feature + weight) and {1}% by Output from SDP. Empty space {2}%".format(inp,out,remaining))
 
-''' check stack trace of function calls 
-	
-	main() -> total_inference_time() ->  '''
 
 '''Non-Operation'''
 def optimizer():
