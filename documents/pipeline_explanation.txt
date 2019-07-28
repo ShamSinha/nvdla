@@ -97,6 +97,11 @@ So we can see how pipelining both horizontally by chunking data and vertically b
 
 
 
+Abstract:
+
+In this report we discuss the NVDLA(open source accelerator by NVIDIA for ML inference acceleration) in conjunction with state-of-the-art GDDR6 memory technology for Neural Network acceleration. In particular, we discuss acceleration of two neural networks; YOLOv3 and Faster R-CNN which are widely used for object detection/classification and serve as good candidates for testing. This is because of the variety of layers in the networks including Convolution Layers, Fully Connected Layers, RESNET operation (Concatenation of feature maps), Max Pooling, Reshape etc which are pretty standard across several such architectures and provide sufficent complexity for hardware mapping. Mapping these networks to the hardware architecture allows us to implement a fast and efficient pipeline that could provide real time inference on these networks and networks of similar complexity. At the same time, it also allows us to examine the role of the new GDDR6 technology and on-chip SRAM in boosting our architecture. 
+As a result, we created a software technology that computes the inference time for a given input image based on our pipeline architecture impelmented for a system with high level components as GDDR6 as main memory, on-chip SRAM and NVDLA Computing architecture. Keeping the technology configurable was an important decision as it gives the freedom to choose components given an input neural network and build an optimal hardware architecture. On top of this, the pipeline is built which provides fast computing and efficient use of hardware. The larger benifit of this technology is fast prototyping and design of hardware architecture for various classes of Neural Networks that can be inferred in real time for time critical tasks. 
+This report is organized as follows: section 1, we will briefly introduce the NVDLA; section 2, details of memory; section 3, three modes in CBUF; section 4, pipeline; section 5, how the neural network is computed; section 6, results and conclusion.
 
 
 
