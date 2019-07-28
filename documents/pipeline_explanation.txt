@@ -72,17 +72,13 @@ First we name these pipelines and draw a structure to shows how it works
  	Pipe 4 -- Assembly Group -- > Delivery Group
  	Pipe 5 -- SRAM -- > DRAM
 
-				 	L2_pipe
-					 /	  \
-					/      \
-				   /        \
-				  /	         \
-			L1_1_Pipe    L1_2_pipe
-			 /	|	           /\
-		    /	|		      /  \
-		   /	|		     /    \
-		  /		|	        /      \
-	 Pipe 1	  Pipe 4      Pipe 2   Pipe 3
+
+	 ---> L1_1_Pipe  ---->  L1_2_pipe ----> Pipe 5 ----> L1_1_Pipe ----> L1_2_pipe ----> Pipe 5 		----------->                  ---> L1_1_Pipe ----> L1_2_Pipe ----> Pipe 5
+	/		 /\		            /\						   /\		         /\ 													 /
+   / 		/  \		       /  \						  /  \		        /  \             Repeat until SRAM data is spent   		/			   	Repeat previous steps for all data chunks in DRAM
+  /		   /	\		      /    \					 /	  \		       /    \           			...........				   /									............
+ / 		  /		 \	         /      \					/	   \	      /      \												  /	
+Pipe0	Pipe 1 Pipe 4      Pipe 2   Pipe 3			  Pipe 1 Pipe 4      Pipe 2   Pipe 3										Pipe0
 
 
 Pipe 2 and Pipe 3 together form a top level Pipeline that we call L1_2_Pipe. While the data in the CBUF is being computed, at the same time, the data that that has been computed and now stored in Delivery Group can be moved to SDP and finally to on chip SRAM. This would mean that while the next chunk of data is being computed. The current one can be post-processed and put back in on chip SRAM for the next layer. Here we consider the Pipe which takes the maximum time to finish as the top level L1_2_Pipe time. This is beacuse the two pipes are working in parallel and we can begin the next top level operation only once this has completed. For example if Pipe 2 is faster than Pipe 3, then we consider Pipe 3s time as L1_2_Pipe time. 
